@@ -349,8 +349,27 @@ This feature needs three new pieces, working together:
 * Frontend changes — a search box with a live dropdown, and logic to walk that chain, opening each branch in turn, before highlighting the result.
 
 ### Get ancestor chain
-Purpose: Given any taxonID — including a synonym's — returns the ordered list of taxonIDs from the top of the tree (e.g. Animalia) down to the hierarchical taxon that needs to be expanded to reveal it. If the given taxon is itself a synonym or pinned misapplication, the chain resolves to its accepted name's position in the hierarchy first, since that's where it's displayed (in the separated synonyms branch underneath). This is then used to auto-expand the taxonomy tree to a search result.
+Purpose: Given any taxonID - including a synonym's - returns the ordered list of taxonIDs from the top of the tree (e.g. Animalia) down to the hierarchical taxon that needs to be expanded to reveal it. If the given taxon is itself a synonym or pinned misapplication, the chain resolves to its accepted name's position in the hierarchy first, since that's where it's displayed (in the separated synonyms branch underneath). This is then used to auto-expand the taxonomy tree to a search result.
 
 [Query-4get_ancestor_chain.sql](Query-4get_ancestor_chain)
 
+main.py was updated by adding new functions from
+`import re`
 
+and adding 2 new functions:
+* one which Searches every taxon name in the database in one go - accepted
+    names, doubtful names, misapplied names, and synonyms all live
+    in the same taxonomy table, so this naturally covers all of them
+    (aim iv in the project README: 'searchable using boolean
+    searches, which will link to any taxonomic entry, accepted or
+    not').
+    Basic boolean support: the query is split on the word 'OR' into
+    separate alternative searches; within each, every space-separated
+    word must appear somewhere in the name (an implicit AND).
+    e.g. "carabodes minusculus" finds names containing both words;
+    "carabodes OR chamobates" finds names matching either.
+
+* another which, given any taxonID - including a synonym's - returns the ordered
+    chain of hierarchy taxonIDs from the top of the tree (Animalia)
+    down to the hierarchical node that the front-end tree needs to
+    expand to reveal it. Wraps get_ancestor_chain() (Query-4).
