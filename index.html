@@ -5,15 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aphanologia - UK Acari Distribution Map</title>
     
-    <!-- Leaflet CSS for Map Styling -->
+    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet MarkerCluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     
     <style>
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; }
         #header h1 { margin: 0; font-size: 1.2rem; }
         #map { height: calc(100vh - 50px); width: 100%; }
-        .leaflet-popup-content { font-size: 13px; line-height: 1.5; }
         .popup-title { font-weight: bold; font-style: italic; color: #1b4332; font-size: 14px; }
     </style>
 </head>
@@ -25,24 +27,24 @@
     
     <div id="map"></div>
 
-    <!-- Leaflet JavaScript Library -->
+    <!-- Leaflet JS & MarkerCluster JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     
     <script>
-        // Initialize Map centered on the United Kingdom
         const map = L.map('map').setView([54.5, -4.0], 6);
 
-        // Add OpenStreetMap Tile Layer
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors | Aphanologia Portal'
+            attribution: '&copy; OpenStreetMap contributors | Aphanologia'
         }).addTo(map);
 
-        // Fetch Live GeoJSON from your FastAPI Endpoint (Limit 500 records)
-        fetch('/api/v1/observations/geojson?limit=500')
+        // Initialize Marker Cluster Group
+        const markers = L.markerClusterGroup();
+
+        fetch('/api/v1/observations/geojson?limit=5000')
             .then(response => response.json())
             .then(data => {
-                // Add GeoJSON Points to the Map
-                L.geoJSON(data, {
+                const geoJsonLayer = L.geoJSON(data, {
                     pointToLayer: function (feature, latlng) {
                         return L.circleMarker(latlng, {
                             radius: 6,
@@ -65,7 +67,11 @@
                         `;
                         layer.bindPopup(popupContent);
                     }
-                }).addTo(map);
+                });
+
+                // Add points to cluster group and layer to map
+                markers.addLayer(geoJsonLayer);
+                map.addLayer(markers);
             })
             .catch(error => console.error('Error loading GeoJSON:', error));
     </script>
