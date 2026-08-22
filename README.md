@@ -224,3 +224,14 @@ Create a html file in Aphalolgia_Web called index.html
 [index.html](index.html)
 
 At this point [main.py](main.py) was updated to give an interactive map on [http://127.0.0.1:8000](http://127.0.0.1:8000)
+
+Following the provision of a basic dot map at the locaiton above, this was updated to provide expandable clusters
+
+Then an update to both main.py and index.html to allow for dynamic selection of taxa, recording dates, and to toggle the cluster view on or off.
+
+This script imports a list of observations where the taxonomy should be manually overridden, due to past misapplications of names.  this draws on a page in the original upload file containinf the observationID and the revisedtaxonID.
+
+[import_manual_updates.py](import_manual_updates.py)
+
+
+
