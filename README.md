@@ -249,6 +249,21 @@ This script was run as a query in pgAdmin 4 to ensure fast spatial queries when 
 
 [BuildSpatial&BtreeIndex_Aphanologia.sql](BuildSpatial&BtreeIndex_Aphanologia.sql)
 
+Once in SQL, the database schema was refined to ensure future compatibility with standard biological database structures and allow flexibility.
+The following key standard mechanisms used by major biological record centers (NBN, GBIF, iRecord) were built into the schema extension below:
+
+1.	Identification Key Linkages: Extending taxonomy_literature_junction with matrix flags (is_key, key_coverage_rank, url_link) so users can click a genus/family and immediately get a link to the online key or paper needed to reach species.
+
+2.	Darwin Core / GBIF / NBN Atlas Syncing: Adding fields for gbif_dataset_id, dwc_occurrence_id (UUID), sensitivity_precision (for obfuscating rare species locations if needed), and sync timestamps (last_gbif_sync).
+
+3.	Audit Trail & Verification: A standard NBN status workflow (pending, verified, queried, rejected) attached to every observation, tracking who verified it and when.
+
+4.	Media & Molecular Barcodes: Dedicated tables for photographs (with thumbnail URLs, primary image flags, license/copyright metadata) and DNA barcode sequences (COI, 18S, ITS).
+
+This script was run to effect these changes:
+
+[Update&FutureproofStructure_Aphanologia.sql](Update&FutureproofStructure_Aphanologia.sql)
+
 
 Set up FastAPI for web interface
 Think of Python as the engine that sits between your PostGIS database and the web browser. FastAPI is a popular Python framework used to build web applications and APIs (Application Programming Interfaces). The API acts as a translator: when a browser asks, "Show me all Acari records in Devon," FastAPI queries your local PostgreSQL database, converts the spatial points into a standard web format (GeoJSON), and sends it to the web page to display on a map.
