@@ -1,67 +1,123 @@
 # Aphanologia
-Creating a web-based PostgreSQL database for exploring and displaying infomration about soil organisms and other obscure groups in the UK.
+This repository describes efforts to create a web-based PostgreSQL database for exploring and displaying infomration about soil organisms and other obscure groups in the UK.  The name means "knowledge of hidden things". It is being initially created to host data on Acari, but it is hoped to be adapted and applied to other groups if this is useful.
 
 ### Background
 With effort from staff and volunteers, a total of 25,000 records of acari observed in Great Britain, and every entry has now been matched to a valid scientific name according a synonymic taxonomic database i've constructed to support the assignment of records from British mite research, and help generate a national species list. Of the 2479 species of acari thought to be in the UK, i have amassed records of at least one observation of 1653 of these. The remaining species have been listed in more general documents (e.g. international reviews of a taxon group which notes “Great Britain” as a known location, or attempts at past species lists where the sources of the observations aren’t clear.  There are probably also some, like Hermannia scabra, which have been recorded under this name, but all of whose records have been proven to be likely to refer to Hermannia nodosa – I may remove these from the list in due course.  All this data, and other data mentioned below, are currently in an Excel spreadsheet.
 
-This project aims to use these 2 datasets to form the basis of an online database which will allow people to view and map British observations of acari, at a range of taxonomic levels, download data, view information about species found together in the same sample, view or download photographs of identified specimens, view taxonomic information about the species (other names applied to this species in the UK), get references, or even link to downloadable documents, relating to the species, its observations identification and taxonomy.  The database should also allow superusers to update taxonomic relationships, add additional records, or add other information to the database.  The database should be compatible with, and ideally linked to, the NBN atlas, the UK species inventory and the GBIF.
+This project aims to use these data to form the basis of an online database which will allow people to view and map British observations of acari, at a range of taxonomic levels, download data, view information about species found together in the same sample, view or download photographs of identified specimens, view taxonomic information about the species (other names applied to this species in the UK), get references, or even link to downloadable documents, relating to the species, its observations identification and taxonomy.  The database should also allow superusers to update taxonomic relationships, add additional records, or add other information to the database.  The database should be compatible with, and ideally linked to, the NBN atlas, the UK species inventory and the GBIF.
 
-Various tables were created (needs combining with the final table schema below!)
+Various tables were created in excel in preparation for this effort. The headers below are the names of the worksheets
 
-The taxonomy part of the database includes the following information
-* taxonid	A unique number relating to the taxon name
-* parentNameUsageID	The unique number of the parent (either a higher parent taxon or the correct name for synonyms or misapplications)
-* scientificName	The binomial or trionomial name.  Subspecies are written as a 3 word trinomial, varieties have the variety name preceded by “var. ” and formas have the forma name preceded by “f. ”
-* taxonrank	The rank of the taxon including kingdom, phylum, class, superorder, order, suborder, infraorder, hyporder, parvorder, microrder, nanorder, superfamily, family, subfamily, genus, species, subspecies, *
-variety, forma.  Note that I have chosen to include names that include subgenera as a “synonym” but included “valid name with subgenus”, to keep the logic clean.
-* scientificnameAuthorship	The name and date of the author that first described the species with names in brackets for instances where the root name is retained or merely adapted, “sensu Name, date” for * misapplications or “non Author, date” for instances where multiple authors have erected the same name independently.
-* taxonomicStatus	Is either “accepted”, “doubtful”, “misapplied” or “synonym”
-* nomenclaturalStatus	may be: invalid - superseded basionym; invalid - junior synonym; invalid - subsequent combination of basionym; invalid - literature misspelling; misapplied; species inquirenda; invalid - subsequent combination of junior synonym; invalid - misspelled or invalid basionym; invalid - misspelled or invalid junior synonym; valid name with subgenus; nomen dubium 
-* taxonRemarks	Notes on synonymy and justification for presence in UK species list, where known
+#### Taxonomy
+* taxonid:	A unique number relating to the taxon name
+* parentNameUsageID:	The unique number of the parent (either a higher parent taxon or the correct name for synonyms or misapplications)
+* scientificName:	The binomial or trionomial name.  Subspecies are written as a 3 word trinomial, varieties have the variety name preceded by “var. ” and formas have the forma name preceded by “f. ”
+* taxonrank:	The rank of the taxon including kingdom, phylum, class, superorder, order, suborder, infraorder, hyporder, parvorder, microrder, nanorder, superfamily, family, subfamily, genus, species, subspecies, variety, forma.  Note that I have chosen to include names that include subgenera as a “synonym” but included “valid name with subgenus”, to keep the logic clean.
+* scientificnameAuthorship:	The name and date of the author that first described the species with names in brackets for instances where the root name is retained or merely adapted, “sensu Name, date” for * misapplications or “non Author, date” for instances where multiple authors have erected the same name independently.
+* taxonomicStatus:	Is either “accepted”, “doubtful”, “misapplied” or “synonym”
+* nomenclaturalStatus:	may be: invalid - superseded basionym; invalid - junior synonym; invalid - subsequent combination of basionym; invalid - literature misspelling; misapplied; species inquirenda; invalid - subsequent combination of junior synonym; invalid - misspelled or invalid basionym; invalid - misspelled or invalid junior synonym; valid name with subgenus; nomen dubium 
+* taxonRemarks:	Notes on synonymy and justification for presence in UK species list, where known
 
+#### Observations
+* observationID:  unique reference number. This is the same as that used in previous versions of the AcReS (Acari Recordign Scheme)
+* eventID: a linking key to the Samples table below
+* taxonID	The linking reference number to the Taxonomy table, relating to the unique taxon name originally recorded, or, if taxonomy manually updated, one that matches the entry (e.g. Macrochelid sp. Original entry might match to the GUID for Macrochelidae, Anoetidae would match to the GUID for Histiostomatidae, Eriophyid sp recorded in 1921 would match to Eriophyoidea because it could now refer to several families etc.date collected min	the earliest date possible for the observation
+* identifiedBy: The name of the person identifying the specimen
+* identificationVerificationStatus: the confidence we have in the identification - may be unverified, plausible, unlikely, probable, certain etc.
+* verifiedBy: The name of the person verifying the identification
+* identificationRemarks: free text for notes on the identification process or issues.
+* collectionID: the broad type of collection associated with the speciment (e.g. personal collection, LTMN monitoring programme etc.).
+* catalogNumber: entry now superseded by observations demographics below.
+* basisOfRecord: the type of material providing the observations, e.g. stillphotograph, preserved specimen, COi barcode etc.
+* idTechnique: How the specimen was identified, morphological observation, genetics, image recognition etc.
+* idReference: Not needed now due to junction table
+* idText: general remarks on the occurrence not relating to identification process (e.g. ecology, etc.).
 
-I also have a Observations sheet for individual (or grouped) observations, mostly harvested from the literature.  This includes:
-* Unique identifier	A unique reference number preceded by AcReS (Acari Recordign Scheme)
-date collected min	the earliest date possible for the observation
-corrected date collected max	the latest date possible for the observation 
-* Collected/Photo By	The name of the person that observed the animal or took a photograph, to allow ID by another person.
-* ID by	The person identifying the animal
-* GUID	The unique taxon name originally recorded, or, if taxonomy manually updated, one that matches the entry (e.g. Macrochelid sp. Original entry might match to the GUID for Macrochelidae, Anoetidae would match to the GUID for Histiostomatidae, Eriophyid sp recorded in 1921 would match to Eriophyoidea because it could now refer to several families etc.
+#### Samples
+* eventID:      A unique number assigned to each individual sampling event (could be a single observation of a single specimen, a group of specimens observed together, a community extracted by a tullgren extract, or a collection of Tullgren funnel extracts bulked from a single site over a period of a year, if all bulked and reported together.
+* samplingLocation: Place name as free text.
+* decimalLatitude: latitude (WGS84) in decimal format.
+* decimalLongitude: longitude (WGS84) in decimal format.
+* coordinateuncertaintyinmeters: radius in metres of estimated area around central recorded point within which sampling event could have occurred
+* bngx: British national grid eastings
+* bngy: British national grid northings
+* gridRef: OS landranger type grid reference
+* earliestDateCollected: the earliest possible date for the sample observation in format YYYY-MM-DD
+* latestDateCollected: the latest possible date for the sample observation in format YYYY-MM-DD
+* habitat: UK Broad habitat type
+* SHADe: This is a microhabitat recording system based on a code where Substrates(S) are described by 4 letters (TsSc woud refer to Timber – soft rot Soil clayey, and would refer to a soft rotting piece of wood lying on clayey soil with the organism found at the interface. Humidity regime (H) (a number from 1 to 7 where 7 is continuously submerged, and 1 is continuously dry e.g. stored products), Acidity/Alkalinity (A)– an estimate of the pH to the nearest whole number of the situation where appropriate (normally just for soils compost manures, dung etc.), and DisturbancE (De) – how long this situation has existed (from 7: centuries (including regular cyclic change e.g. tides, forest leaf fall) to 1: more or less constantly disturbed.  Missing or unknown data is represented by “X” or “x” and the elements are separated by hyphens for easy reading (e.g. TsSc-5-6-5 – Soft rotting wood lying on clayey soil that almost never dries out – only after a fully dry month  on pH 6 soil, that has been in place for between a decade and a century). This column also contains other text microhabitats which don’t follow this format.
+* microhabitat: free text description of the microhabitat sampled
+* samplingProtocol: free text description of the sampling protocol (Tullgren funnel, sieve and pooter etc.)
+* samplesizeValue: the size of the sample taken in the units below
+* samplesizeUnit:  the units used to describe the sample size (e.g. cm3)
+* recordedBy: the name of the person collecting the sample.
+* eventRemarks: general notes on the observation – more details on habitat, microhabitat, type of sample taken, associations with other specific animals/plants
+* datarestricted: data sharing restrictions data record
+* licenceHolder: if data is restricted, who holds the licence
+* dataSource: the source of the sample record as free text. May be a publication reference or type of collection (monitoring programme, personal collection, photo posted on facebook group etc.)
 
-I have a samples sheet describing the characteristics of the sample where the organisms were collected or site characteristics where they were observed.
-* sampleID	A unique number assigned to each individual sampling event (could be a single observation of a single specimen, a group of specimens observed together, a community extracted by a tullgren extract, or a collection of Tullgren funnel extracts bulked from a single site over a period of a year, if all bulked and reported together.  Characterised by:
-* SHADe code	This is a microhabitat recording system based on a code where Substrates(S) are described by 4 letters (TsSc woud refer to Timber – soft rot Soil clayey, and would refer to a soft rotting piece of wood lying on clayey soil with the organism found at the interface. Humidity regime (H) (a number from 1 to 7 where 7 is continuously submerged, and 1 is continuously dry e.g. stored products), Acidity/Alkalinity (A)– an estimate of the pH to the nearest whole number of the situation where appropriate (normally just for soils compost manures, dung etc.), and DisturbancE (De) – how long this situation has existed (from 7: centuries (including regular cyclic change e.g. tides, forest leaf fall) to 1: more or less constantly disturbed.  Missing or unknown data is represented by “X” or “x” and the elements are separated by hyphens for easy reading (e.g. TsSc-5-6-5 – Soft rotting wood lying on clayey soil that almost never dries out – only after a fully dry month  on pH 6 soil, that has been in place for between a decade and a century). This column also contains other text microhabitats which don’t follow this format.
-* Habitat	UK Broad habitat type
-* Specimen location	where the specimen is store, if available.
-* Notes	general notes on the observation – more details on habitat, microhabitat, type of sample taken, associations with other specific animals/plants, or notes on taxonomic assignment of this obseration.
-* Postcode	Location as postcode
-* Lat (WGS84)	latitude
-* long (WGS84)	longitude
-* gridref	OS landranger type grid reference
-* BNG X	British nation grid eastings
-* BNG Y	British national grid northings
-* location (text)	Place name
-* Accuracy (radius in metres)	estimated area around central recorded point, to where record could refer
-* entered on	Date entered into database 
-* entered by	Person entering data
-* Public or restricted	nature of data record (some are restricted)
-* Data licence holder	if restricted, who holds the licence
-* Data source	The full publication reference (good to make this link to literature table with a number, or type of collection (monitoring programme, personal collection, photo posted on facebook group etc.)
+#### Observation_Demographics
+demographicID: A unique number for each demographic group record within a single observation of a species.
+observationID: the reference number linking these to the observations table above.
+sex: the sex of the specimens, being male, female, undetermined, mixed
+lifestage: the life stage of the specimen being egg, prolarva, larva, protonymph, deutonymph, tritonymph, nymph, juvenile, adult, dead remains, undetermined, sign or gall.
+count: the total number of specimens in this demographic group
+density: the density of individuals in this demographic group expressed per densityUnit (see below)
+densityUnit: the unit of measurement (e.g. m2, 100cm3) within which the density above is expressed.
+minCount: the minimum number (where a range, minimum of maximum is given) - may also apply to densities where a density unit is given (e.g. 1-5 per 100cm3)
+maxCount: the maximum number (where a range, minimum of maximum is given) - may also apply to densities where a density unit is given (e.g. 1-5 per 100cm3)
+countDescription: free text to use where abundance descriptions are given (very numerous, scarce, etc.)
 
-I have also created a literature table comprising the following headings:
-* litID	a unique number for each pubnlication
-* title	title of publication
-* author	the author(s) of  the publication, in format Surname, A.B.C – additional authors separated by further commas and final author separated by “&”
-* year	Year of publication
-* publication	The journal or book in which the article was published
-* sourceURL	Where the article may be viewed or downloaded online
-* litnotes	notes on this publication.
+#### Specimens
+specimenID: a unique number for each specimen - note that all specimens must first be entered into a demographic group
+demographicID: linking referece to the Observation_Demographics table above.
+specCount: the number of specimens (usually 1) in the specimen record
+specBarcode: the COi barcode of the specimen.
+specPhotos: a URL link to a folder where specimen photos can be viewed.
+specLocation: the institute or collection where the specimen is held.
+specRef: the reference number of that specimen in that collection
+specPreservation: the type of preservation (in ethanol, slide mount etc.)
+specType: the taxonomic status of the specimen (Holotype, Paratype, Allotype etc.)
+specComments: comments on the specimen.
 
-I’ve produced a junction table linking sampleID with litID, so every sample is referenced.
-I’d like to use the lit table also to reference “as used in”, “first published in”, “synonymy from” and “ID literature” in the taxonomy table.
-There are still some issues with the data set (inconsistent use of SHADEs, some literature names spelt out in full) but I’m keen to see if we can build the database and tidy up the issues more easily from within a database format, as using Excel is getting pretty difficult.
-Given the ambitions above, and the data I have outlined to start off with, please can you outline the steps I’d need to take to get me from this current situation to the online database ambition I’ve outlined?  I’m no expert in this (my expertise is in soil biology, not database building!) so I’ll need to be walked through each step.  I feel I’ve carried out the largest data hygiene task, but if there are others I should complete before leaving excel then please let me know.
-In the past you’ve suggested a PostGRES (SQL?) geodatabase, perhaps with a Django GUI (front end).  However, I’m happy to proceed with whatever you think is best.
+#### Literature
+litID: Unique reference number for a publication
+articleTitle: title of article or chapter or book in series.
+authorName:  the name or names of authors in the format Surname, A.B.. Multiple authors are given seperated by commas, or the last 2 by an ampersand (&).
+editorName: the name of the editor in the format A.B. Surname
+yearPublished: year of publication
+publicationTitle: the name of the journal or book series, or the name of the book, if a standalone publication.
+publicationSeries: the number or name of the series of publication
+publicationVolume: the number in arabic numerals of the publication volume
+publicationIssue: the number in arabic numerals of the publication issue
+publicationTotalpages: the total number of pages in the publication (books, pamphlets etc.)
+publicationPages: the page range for the article, chapter etc. in the format 23-45
+publishedBy: the name and location of the publisher.
+publicationISBNorISSN: the ISBN or ISSN reference number of the publication
+publicationDOI: the unique DOI refrence of the publication
+sourceURL: the URL where the publication is either referenced or available in full
+litNotes: free text comments on the publication
+
+#### Taxonomy_Literature_Junction
+taxonid: link to Taxonomy table
+Type: how this reference relates to the taxon. May be "As used in", "Name first published in", "Presence in UK from" or "Taxonomy or synonymy from"
+litID: link to Literature table
+
+#### Sample_Literature_Junction
+eventID: link to Samples table
+Type: Currently only "Source of record" entries.
+litID: link to Literature table
+
+#### Observation_Literature_Junction
+observationID: link to Observations table
+type:  Currently only "identified using"
+litID: link to Literature table 
+
+#### manual_taxonomy_update
+observationID: link to Observations table.
+revisedtaxonID:  the revised taxonID to be applied to this observation, rather than using the rules in the Taxonomy table.
+
+Many of these tables would benefit from further rearrangement of the data currently in the free text tables, to update SHADe, specimen location, etc.
 
 ### Aim and requirements
 
@@ -86,15 +142,14 @@ Some data from recent Natural England research, CEH research etc.
 Also personal observations, photos from Facebook group etc.
 Data arranged into this final schema of tables ready for a final python script to upload.  I'll give the name of the excel tab where the table is found, then a colon, and then all the headers - let me know if you need to know anything specific about the data under these headers if it's not clear.
 
-Samples: eventID	samplingLocation	decimalLatitude	decimalLongitude	coordinateuncertaintyinmeters	bngx	bngy	gridRef	earliestDateCollected	latestDateCollected	habitat	SHADe	microhabitat	samplingProtocol	samplesizeValue	samplesizeUnit	recordedBy	eventRemarks	datarestricted	licenceHolder	dataSource
 
-Observations: observationID	eventID	taxonID	identifiedBy	identificationVerificationStatus	verifiedBy	identificationRemarks	collectionID	catalogNumber	basisOfRecord	idTechnique	idReference[LitID]	idText[free_text]	occurrenceRemarks
+
 
 Observation_Demographics: demographicID	observationID	sex	lifestage	count	density	densityUnit	minCount	maxCount	countDescription
 
 Specimens: specimenID	demographicID	specCount	specBarcode	specPhotos	specLocation	specRef	specPreservation	specType	specComments
 
-Taxonomy: taxonID	parentNameUsageID	scientificName	taxonrank	scientificnameAuthorship	taxonomicStatus	nomenclaturalStatus	acceptednameusageid	taxonRemarks
+
 
 Literature: litID	articleTitle	authorName	editorName	yearPublished	publicationTitle	publicationSeries	publicationVolume	publicationIssue	publicationTotalpages	publicationPages	publishedBy	publicationISBNorISSN	publicationDOI	sourceURL	litNotes
 
@@ -103,6 +158,8 @@ Taxonomy_Literature_Junction: taxonid	Type	litID
 Sample_Literature_Junction: eventID	Type	litID
 
 Observation_Literature_Junction: observationID	type	litID
+
+manual_taxonomy_update: observationID      revisedtaxonID
 
 All these tables are represented in a single excel spreadsheet saved to:
 
