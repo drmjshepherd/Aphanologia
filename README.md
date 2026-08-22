@@ -233,5 +233,7 @@ This script imports a list of observations where the taxonomy should be manually
 
 [import_manual_updates.py](import_manual_updates.py)
 
+These were applied in SQL with this query:
+[ManualUpdateOverride_Aphanologia.sql](ManualUpdateOverride_Aphanologia.sql)
 
 
