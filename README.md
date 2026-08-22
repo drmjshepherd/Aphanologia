@@ -293,4 +293,13 @@ This script imports a list of observations where the taxonomy should be manually
 These were applied in SQL with this query:
 [ManualUpdateOverride_Aphanologia.sql](ManualUpdateOverride_Aphanologia.sql)
 
+Some further adjusments were made to seperate out synonym parentage (mapping to accepted species), from parentage of valid taxa, with misapplications being applied to the correct taxa via the observation_taxonomy_override.  There were 3 diagnostics carried out in SQL:
+
+[Diag-A](Diag-A)
+
+[Diag_B](Diag_B)
+
+[Diag_C](Diag_C)
+
+
 
