@@ -309,3 +309,16 @@ The following script rebuilds view_effective_observations to use the new column
 Purpose: Updates the view that resolves each observation's "effective" (correct, current) taxon. Resolution order is: (a) per-observation manual override, if one exists; (b) otherwise, follow acceptedNameUsageID if the recorded taxon is a synonym or pinned misapplication; (c) otherwise, use the taxon as recorded. Also adds a flag identifying any observation recorded against an unpinned misapplied name with no manual override — these should not be treated as resolved, and the flag lets the front end and any future data QA surface them rather than silently guessing.
 
 [Migration-2.sql](Migration-2.sql)
+
+Having tested the data, the main was updated again to effect the following:
+* Added a new page route /taxonomy that will serve a new taxonomy.html file
+* Added four new /api/v1/taxonomy/... endpoints, one per bullet above.
+* Changed the existing map endpoint (/api/v1/observations/geojson) to read from view_effective_observations instead of the raw observations/taxonomy tables, and added a new taxon_id option that uses your descendant-search function. The old taxon_name text search still works too, as a fallback, so the current index.html won't break.
+
+# Taxonomy Browser page
+Here's the plan for taxonomy.html, explained before the code so the structure makes sense:
+
+* Left side: the tree. It starts by loading Animalia (via /api/v1/taxonomy/root). Each row has a small triangle (▶) if it has children and/or synonyms to show. Clicking the triangle asks the server for that taxon's children and synonyms and inserts them just below, indented — this is the "lazy loading" we discussed, so it only ever fetches what's actually being looked at.
+* Synonyms get their own visually distinct branch — slightly greyed out, italic, with a small "synonym of" label, and no expand arrow of their own (since your data model doesn't nest synonyms further) — exactly the "slightly separated set of branches" you described.
+* Clicking the name itself (not the triangle) selects that taxon and loads its full details into a panel on the right, via /api/v1/taxonomy/detail/{taxon_id}.
+* A "View on map" button in the details panel links across to your existing map page, pre-filtered to that taxon — this needs one small addition to index.html too (reading a taxon_id from the page's URL when it loads), which I'll give you afterwards.
