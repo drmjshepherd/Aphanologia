@@ -137,16 +137,33 @@
         // Trigger reload when toggling display mode
         document.getElementById('displayMode').addEventListener('change', loadMapData);
 
+                // Reads a value from the page's own URL, e.g. ?taxon_id=5630
+        function getUrlParameter(name) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(name);
+        }
+
         function loadMapData() {
             const taxon = document.getElementById('taxonSearch').value;
             const startYear = document.getElementById('startYear').value;
             const endYear = document.getElementById('endYear').value;
             const radius = parseInt(document.getElementById('markerRadius').value);
             const displayMode = document.getElementById('displayMode').value;
+            const taxonIdFromUrl = getUrlParameter('taxon_id');
 
             // Build API URL with Query Parameters
             let url = `/api/v1/observations/geojson?limit=50000`;
-            if (taxon) url += `&taxon_name=${encodeURIComponent(taxon)}`;
+            if (taxonIdFromUrl) {
+                // Arrived here from the taxonomy browser: filter precisely
+                // by taxonID (includes all descendants and synonyms)
+                url += `&taxon_id=${encodeURIComponent(taxonIdFromUrl)}`;
+				fetch("/api/v1/taxonomy/detail/"+encodeURIComponent(taxonIdFromUrl)) // human written wow! fetches api taxon data
+							.then(function(response) { return response.json(); })  // not sure exactly what this line does but it doesnt work without it
+							.then(function(json) {document.getElementById("taxonSearch").value = json.scientificName}); // sets value in text box to the scientific name
+            } else if (taxon) {
+                // Ordinary text search typed into the sidebar box
+                url += `&taxon_name=${encodeURIComponent(taxon)}`;
+            }
             if (startYear) url += `&start_year=${startYear}`;
             if (endYear) url += `&end_year=${endYear}`;
 
