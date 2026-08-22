@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from typing import Optional
 from database import get_db_connection
 import json
+import re
 
 app = FastAPI(
     title="Aphanologia Acari Portal API",
@@ -31,25 +32,29 @@ def serve_taxonomy():
 def get_taxonomy_root():
     """
     Returns the top-level taxon/taxa to start the tree from
-    (normally just Kingdom Animalia). A taxon counts as
-    'top-level' if it has no parent and is not itself a
-    synonym of anything.
+    (normally just Kingdom Animalia). Field names deliberately
+    match get_immediate_children()'s output so the front-end
+    tree code can treat every level identically.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("""
             SELECT
-                t."taxonID",
-                t."scientificName",
-                t."scientificnameAuthorship",
-                t."taxonrank",
-                t."taxonomicStatus",
+                t."taxonID" AS taxon_id,
+                t."scientificName" AS scientific_name,
+                t."scientificnameAuthorship" AS authorship,
+                t."taxonrank" AS taxon_rank,
+                t."taxonomicStatus" AS taxonomic_status,
                 EXISTS (
                     SELECT 1 FROM taxonomy c
                     WHERE c."parentNameUsageID" = t."taxonID"
                       AND c."acceptedNameUsageID" IS NULL
-                ) AS has_children
+                ) AS has_children,
+                EXISTS (
+                    SELECT 1 FROM taxonomy s
+                    WHERE s."acceptedNameUsageID" = t."taxonID"
+                ) AS has_synonyms
             FROM taxonomy t
             WHERE t."parentNameUsageID" IS NULL
               AND t."acceptedNameUsageID" IS NULL
@@ -62,7 +67,6 @@ def get_taxonomy_root():
     finally:
         cursor.close()
         conn.close()
-
 
 @app.get("/api/v1/taxonomy/children/{taxon_id}")
 def get_taxonomy_children(taxon_id: str = Path(..., description="The taxonID to fetch children for")):
@@ -151,6 +155,97 @@ def get_taxonomy_detail(taxon_id: str = Path(..., description="The taxonID to fe
         cursor.close()
         conn.close()
 
+@app.get("/api/v1/taxonomy/search")
+def search_taxonomy(
+    q: str = Query(..., min_length=3, description="Search text (minimum 3 characters). Separate alternative searches with OR; space-separated words within a search are combined with AND."),
+    limit: int = Query(15, ge=1, le=50, description="Maximum number of matches to return")
+):
+    """
+    Searches every taxon name in the database in one go - accepted
+    names, doubtful names, misapplied names, and synonyms all live
+    in the same taxonomy table, so this naturally covers all of them
+    (aim iv in the project README: 'searchable using boolean
+    searches, which will link to any taxonomic entry, accepted or
+    not').
+
+    Basic boolean support: the query is split on the word 'OR' into
+    separate alternative searches; within each, every space-separated
+    word must appear somewhere in the name (an implicit AND).
+    e.g. "carabodes minusculus" finds names containing both words;
+    "carabodes OR chamobates" finds names matching either.
+    """
+    or_groups = [g.strip() for g in re.split(r'\bOR\b', q, flags=re.IGNORECASE) if g.strip()]
+    if not or_groups:
+        return {"query": q, "count": 0, "results": []}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        group_clauses = []
+        params = []
+        for group in or_groups:
+            words = [w for w in group.split() if w]
+            if not words:
+                continue
+            word_clauses = []
+            for word in words:
+                word_clauses.append('"scientificName" ILIKE %s')
+                params.append(f"%{word}%")
+            group_clauses.append("(" + " AND ".join(word_clauses) + ")")
+
+        if not group_clauses:
+            return {"query": q, "count": 0, "results": []}
+
+        where_sql = " OR ".join(group_clauses)
+
+        sql = f"""
+            SELECT
+                "taxonID" AS taxon_id,
+                "scientificName" AS scientific_name,
+                "scientificnameAuthorship" AS authorship,
+                "taxonrank" AS taxon_rank,
+                "taxonomicStatus" AS taxonomic_status
+            FROM taxonomy
+            WHERE {where_sql}
+            ORDER BY "scientificName"
+            LIMIT %s;
+        """
+        params.append(limit)
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        return {"query": q, "count": len(rows), "results": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/taxonomy/path/{taxon_id}")
+def get_taxonomy_path(taxon_id: str = Path(..., description="The taxonID to find the tree path for")):
+    """
+    Given any taxonID - including a synonym's - returns the ordered
+    chain of hierarchy taxonIDs from the top of the tree (Animalia)
+    down to the hierarchical node that the front-end tree needs to
+    expand to reveal it. Wraps get_ancestor_chain() (Query-4).
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM get_ancestor_chain(%s);", (taxon_id,))
+        rows = cursor.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No taxon found with taxonID {taxon_id}")
+        ordered_ids = [r["taxon_id"] for r in rows]
+        return {"taxon_id": taxon_id, "chain": ordered_ids}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
 
 # ==========================================================
 # MAP / OBSERVATIONS ENDPOINT
