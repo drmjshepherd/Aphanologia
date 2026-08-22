@@ -299,7 +299,13 @@ Some further adjusments were made to seperate out synonym parentage (mapping to 
 
 [Diag_B.sql](Diag_B.sql)
 
-[Diag_C.sql](Diag_C.sql)
+[Diag_C.sql](Diag_C.sql): Purpose: For every taxon marked misapplied in the Taxonomy table, checks whether all manually-reviewed observations recorded against it (via observation_taxonomy_override) have been corrected to the same target taxon. A single, consistent target across multiple independently-reviewed observations is treated as evidence of a reliable name-to-name mapping (equivalent to a synonym relationship) that can be safely encoded in the Taxonomy table itself. Where overrides for the same misapplied taxon point to different targets in different observations, this confirms the name has been applied in error to more than one real species historically, and must continue to be resolved per-observation rather than via a single taxonomy-level rule.
 
+The following sql script was then applied which Adds a new, unambiguous column to the Taxonomy table that points a synonym or a specifically-pinned ("sensu") misapplied name to its correct accepted taxon, separate from parentNameUsageID (which continues to represent true hierarchical parentage only). Populated for taxonomicStatus = 'synonym' rows, and for taxonomicStatus = 'misapplied' rows whose authorship contains "sensu" (Diag-B/Diag-C confirmed these map consistently). Left NULL for doubtful taxa and for unpinned misapplied names, which remain genuinely ambiguous at the taxonomy level and are resolved only per-observation via observation_taxonomy_override.
 
+[Migration-1.sql](Migration-1.s)
 
+The following script rebuilds view_effective_observations to use the new column
+Purpose: Updates the view that resolves each observation's "effective" (correct, current) taxon. Resolution order is: (a) per-observation manual override, if one exists; (b) otherwise, follow acceptedNameUsageID if the recorded taxon is a synonym or pinned misapplication; (c) otherwise, use the taxon as recorded. Also adds a flag identifying any observation recorded against an unpinned misapplied name with no manual override — these should not be treated as resolved, and the flag lets the front end and any future data QA surface them rather than silently guessing.
+
+[Migration-2.sql](Migration-2.sql)
