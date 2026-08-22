@@ -286,35 +286,21 @@ pip install fastapi uvicorn asyncpg psycopg2-binary pydantic
 A central python script was created in the folder Aphanologia_Web
 [main.py](main.py)
 
+This generated 2 web based interfaces accessible via any browser at the following addresses:
 
-Then test it by pasting this into the address bar of a browser:
 http://127.0.0.1:8000
+
 and
+
 http://127.0.0.1:8000/docs
-To connect FastAPI to PostgreSQL and create that spatial GeoJSON endpoint.
-Step 1: Create a Database Connection Module (database.py)
+
+## Connect FastAPI to PostgreSQL and create that spatial GeoJSON endpoint.
+### Step 1: Create a Database Connection Module (database.py)
 In the same Aphanologia_Web folder, create a new file named database.py.
 Paste the following code into database.py (adjust the password on line 6 if your local PostgreSQL superuser password is set to something other than postgres):
-import psycopg2
-from psycopg2.extras import RealDictCursor
 
-# Database Connection Parameters
-DB_CONFIG = {
-    "dbname": "Aphanologia",
-    "user": "postgres",
-    "password": "actual_password_here",  # <--- UPDATE THIS to your local PostgreSQL password
-    "host": "localhost",
-    "port": "5432"
-}
+[database.py](database.py)
 
-def get_db_connection():
-    """Establishes and returns a connection to the local Aphanologia PostGIS database."""
-    try:
-        conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
-        return conn
-    except Exception as e:
-        print(f"❌ Error connecting to Aphanologia database: {e}")
-        raise e
 Create a html file in Aphalolgia_Web called index.html
 <!DOCTYPE html>
 <html lang="en">
