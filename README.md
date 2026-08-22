@@ -126,7 +126,7 @@ The following script checks for duplicates in the primary key
 
 [duplicate_finder.py](duplicate_finder.py)
 
-### Upload data to databse
+### Upload data to database
 Checked records were into the database Aphanologia using this import script
 
 [upload_acres_db.py](upload_acres_db.py)
@@ -238,95 +238,18 @@ This verification script was run as an SQL query in pgAdmin 4
 [verify_database_structure.sql](verify_database_structure.sql)
 
 This produced the output:
-"table_name"	"total_rows"	"bng_geoms_built"	"wgs_geoms_built"
-"literature"	375		
-"observation_demographics"	4919		
-"taxonomy"	8304		
-"observations"	24991		
-"samples"	10093	10090	8423
+|"table_name"|"total_rows"|"bng_geoms_built"|"wgs_geoms_built"|
+|"literature"|375|||	
+|"observation_demographics"|4919|||		
+|"taxonomy"|8304|||		
+|"observations"|24991|||		
+|"samples"|10093|10090|8423|
 
 This script was run as a query in pgAdmin 4 to ensure fast spatial queries when connecting to QGIS, bounding box filters, or running spatial joins. It builds GiST spatial indexes and B-tree indexes on the foreign keys:
--- 1. Build GiST Spatial Indexes for PostGIS
-CREATE INDEX IF NOT EXISTS idx_samples_geom_bng ON samples USING gist (geom_bng);
-CREATE INDEX IF NOT EXISTS idx_samples_geom_wgs84 ON samples USING gist (geom_wgs84);
 
--- 2. Build B-tree Indexes on Foreign Keys for fast JOIN performance
-CREATE INDEX IF NOT EXISTS idx_obs_eventid ON observations ("eventID");
-CREATE INDEX IF NOT EXISTS idx_obs_taxonid ON observations ("taxonID");
-CREATE INDEX IF NOT EXISTS idx_demo_obsid ON observation_demographics ("observationID");
-CREATE INDEX IF NOT EXISTS idx_spec_demoid ON specimens ("demographicID");
-Once in SQL, the database schema was refined to ensure future compatibility with standard biological database structures and allow flexibility.
-To ensure you don't have to re-architect later, here are key standard mechanisms used by major biological record centers (NBN, GBIF, iRecord) built right into the schema extension below:
+[BuildSpatial&BtreeIndex_Aphanologia.sql](BuildSpatial&BtreeIndex_Aphanologia.sql)
 
-1.	Identification Key Linkages: Extending taxonomy_literature_junction with matrix flags (is_key, key_coverage_rank, url_link) so users can click a genus/family and immediately get a link to the online key or paper needed to reach species.
 
-2.	Darwin Core / GBIF / NBN Atlas Syncing: Adding fields for gbif_dataset_id, dwc_occurrence_id (UUID), sensitivity_precision (for obfuscating rare species locations if needed), and sync timestamps (last_gbif_sync).
-
-3.	Audit Trail & Verification: A standard NBN status workflow (pending, verified, queried, rejected) attached to every observation, tracking who verified it and when.
-
-4.	Media & Molecular Barcodes: Dedicated tables for photographs (with thumbnail URLs, primary image flags, license/copyright metadata) and DNA barcode sequences (COI, 18S, ITS).
-
-This script was run to effect these changes:
--- =========================================================================
--- 1. EXTEND LITERATURE JUNCTION FOR IDENTIFICATION KEYS & ONLINE RESOURCES
--- =========================================================================
-ALTER TABLE taxonomy_literature_junction 
-  ADD COLUMN IF NOT EXISTS is_identification_key BOOLEAN DEFAULT FALSE,
-  ADD COLUMN IF NOT EXISTS key_scope_rank VARCHAR(50),
-  ADD COLUMN IF NOT EXISTS online_resource_url TEXT,
-  ADD COLUMN IF NOT EXISTS access_notes TEXT;
-
--- =========================================================================
--- 2. ADD VERIFICATION STATUS & GBIF / NBN ATLAS SYNC FIELDS TO OBSERVATIONS
--- =========================================================================
-ALTER TABLE observations 
-  ADD COLUMN IF NOT EXISTS verification_status VARCHAR(30) DEFAULT 'unverified',
-  ADD COLUMN IF NOT EXISTS verified_by VARCHAR(150),
-  ADD COLUMN IF NOT EXISTS verified_date TIMESTAMP WITH TIME ZONE,
-  ADD COLUMN IF NOT EXISTS verification_notes TEXT,
-  ADD COLUMN IF NOT EXISTS dwc_occurrence_id UUID DEFAULT gen_random_uuid(),
-  ADD COLUMN IF NOT EXISTS share_with_nbn BOOLEAN DEFAULT TRUE,
-  ADD COLUMN IF NOT EXISTS share_with_gbif BOOLEAN DEFAULT TRUE,
-  ADD COLUMN IF NOT EXISTS nbn_export_date TIMESTAMP WITH TIME ZONE,
-  ADD COLUMN IF NOT EXISTS coordinate_uncertainty_meters INT DEFAULT 100;
-
--- =========================================================================
--- 3. SPECIMEN MEDIA / PHOTOGRAPHS TABLE (TYPE MATCHED)
--- =========================================================================
-CREATE TABLE IF NOT EXISTS observation_media (
-    media_id SERIAL PRIMARY KEY,
-    observation_id TEXT REFERENCES observations("observationID") ON DELETE CASCADE,
-    specimen_id TEXT REFERENCES specimens("specimenID") ON DELETE SET NULL,
-    media_type VARCHAR(50) DEFAULT 'photo',
-    file_url TEXT NOT NULL,
-    thumbnail_url TEXT,
-    caption TEXT,
-    photographer VARCHAR(150),
-    license VARCHAR(50) DEFAULT 'CC-BY-4.0',
-    is_primary_for_taxon BOOLEAN DEFAULT FALSE,
-    community_votes INT DEFAULT 0,
-    uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- =========================================================================
--- 4. MOLECULAR / DNA BARCODE TABLE (TYPE MATCHED)
--- =========================================================================
-CREATE TABLE IF NOT EXISTS specimen_barcodes (
-    barcode_id SERIAL PRIMARY KEY,
-    specimen_id TEXT REFERENCES specimens("specimenID") ON DELETE CASCADE,
-    gene_target VARCHAR(50) NOT NULL,
-    ncbi_genbank_accession VARCHAR(50),
-    bold_process_id VARCHAR(50),
-    sequence_data TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- =========================================================================
--- 5. INDEXES FOR FAST API / SPATIAL LOOKUPS
--- =========================================================================
-CREATE INDEX IF NOT EXISTS idx_obs_verification ON observations(verification_status);
-CREATE INDEX IF NOT EXISTS idx_media_obs ON observation_media(observation_id);
-CREATE INDEX IF NOT EXISTS idx_tax_lit_key ON taxonomy_literature_junction(is_identification_key);
 Set up FastAPI for web interface
 Think of Python as the engine that sits between your PostGIS database and the web browser. FastAPI is a popular Python framework used to build web applications and APIs (Application Programming Interfaces). The API acts as a translator: when a browser asks, "Show me all Acari records in Devon," FastAPI queries your local PostgreSQL database, converts the spatial points into a standard web format (GeoJSON), and sends it to the web page to display on a map.
 Create a new folder called
