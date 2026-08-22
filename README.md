@@ -295,11 +295,11 @@ These were applied in SQL with this query:
 
 Some further adjusments were made to seperate out synonym parentage (mapping to accepted species), from parentage of valid taxa, with misapplications being applied to the correct taxa via the observation_taxonomy_override.  There were 3 diagnostics carried out in SQL:
 
-[Diag-A](Diag-A)
+[Diag-A.sql](Diag-A.sql)
 
-[Diag_B](Diag_B)
+[Diag_B.sql](Diag_B.sql)
 
-[Diag_C](Diag_C)
+[Diag_C.sql](Diag_C.sql)
 
 
 
