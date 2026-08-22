@@ -3,7 +3,6 @@ from fastapi.responses import FileResponse
 from typing import Optional
 from database import get_db_connection
 import json
-import os
 
 app = FastAPI(
     title="Aphanologia Acari Portal API",
@@ -11,19 +10,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Serve the Interactive Web Map on Home Page
 @app.get("/", response_class=FileResponse)
 def serve_map():
     return FileResponse("index.html")
 
 @app.get("/api/v1/observations/geojson")
 def get_observations_geojson(
-    limit: int = Query(500, description="Maximum number of spatial points to return", ge=1, le=5000),
-    genus_or_species: Optional[str] = Query(None, description="Filter records by scientific name search (e.g. 'Veigaia')")
+    limit: int = Query(5000, description="Maximum number of spatial points to return", ge=1, le=50000),
+    taxon_name: Optional[str] = Query(None, description="Filter records by scientific name"),
+    start_year: Optional[int] = Query(None, description="Filter records from this year onward"),
+    end_year: Optional[int] = Query(None, description="Filter records up to this year")
 ):
     """
-    Queries PostGIS and converts sample/observation points into a GeoJSON FeatureCollection 
-    suitable for Leaflet, MapLibre, or QGIS mapping web clients.
+    Queries PostGIS and converts sample/observation points into a GeoJSON FeatureCollection,
+    filtered dynamically by taxon name and date range.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -47,9 +47,20 @@ def get_observations_geojson(
         """
         params = []
 
-        if genus_or_species:
+        # Filter by Taxon Scientific Name (matches species, genus, family, suborder, etc.)
+        if taxon_name and taxon_name.strip():
             sql += " AND t.\"scientificName\" ILIKE %s"
-            params.append(f"%{genus_or_species}%")
+            params.append(f"%{taxon_name.strip()}%")
+
+        # Filter by Start Year
+        if start_year:
+            sql += " AND EXTRACT(YEAR FROM s.\"earliestDateCollected\") >= %s"
+            params.append(start_year)
+
+        # Filter by End Year
+        if end_year:
+            sql += " AND EXTRACT(YEAR FROM s.\"earliestDateCollected\") <= %s"
+            params.append(end_year)
 
         sql += " LIMIT %s;"
         params.append(limit)
