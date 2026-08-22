@@ -131,107 +131,26 @@ Checked records were into the database Aphanologia using this import script
 
 [upload_acres_db.py](upload_acres_db.py)
 
-This produced the following output:
-```
-Connecting to database 'Aphanologia'...
-
-✓ Connected successfully. PostGIS extension & ENUM types verified.
-
-
-
-Opening workbook: C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx...
-
-Reading tab 'Samples'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
+This confirmed:
   ✓ Uploaded 10093 rows into table 'samples'.
-
-Reading tab 'Observations'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
   ✓ Uploaded 24991 rows into table 'observations'.
 
-Reading tab 'Observation_Demographics'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
   ✓ Uploaded 4919 rows into table 'observation_demographics'.
-
-Reading tab 'Specimens'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
   ✓ Uploaded 129 rows into table 'specimens'.
 
-Reading tab 'Taxonomy'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
   ✓ Uploaded 8304 rows into table 'taxonomy'.
-
-Reading tab 'Literature'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
   ✓ Uploaded 375 rows into table 'literature'.
 
-Reading tab 'Taxonomy_Literature_Junction'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
   ✓ Uploaded 733 rows into table 'taxonomy_literature_junction'.
-
-Reading tab 'Sample_Literature_Junction'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
   ✓ Uploaded 5425 rows into table 'sample_literature_junction'.
 
-Reading tab 'Observation_Literature_Junction'...
-
-C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFrame.applymap has been deprecated. Use DataFrame.map instead.
-
-  df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
   ✓ Uploaded 73 rows into table 'observation_literature_junction'.
 
-
-Structuring relational constraints and spatial geometries...
-
-  • Generating BNG (EPSG:27700) and WGS84 (EPSG:4326) PostGIS geometries...
-
-  • Applying Primary Keys...
-
-  • Applying Foreign Keys...
-
-
-
-==========================================
-
 🎉 DATABASE STRUCTURE AND DATA UPLOAD COMPLETE!
-
-All 9 tables, PostGIS points, and Foreign Keys are live.
-
-==========================================
-```
 
 This verification script was run as an SQL query in pgAdmin 4
 
