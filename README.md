@@ -202,7 +202,8 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .\venv\Scripts\Activate.ps1
 pip install fastapi uvicorn asyncpg psycopg2-binary pydantic
 ```
-A central python script was created in the folder Aphanologia_Web
+A central python script was created in the folder Aphanologia_Web - this was subject to many updates during the process to provide links to new functions and scripts.
+
 [main.py](main.py)
 
 This generated 2 web based interfaces accessible via any browser at the following addresses:
