@@ -1,10 +1,8 @@
 # Aphanologia
-A web-based PostgreSQL database for exploring and displaying infomration about soil organisms and other obscure groups in the UK.
-
-## Creating a database for exploring soil organism observations in the UK
+Creating a web-based PostgreSQL database for exploring and displaying infomration about soil organisms and other obscure groups in the UK.
 
 ### Background
-I have recently completed an audit of 24990 records of acari observed in Great Britain, and every entry has now been matched to a valid scientific name according a synonymic taxonomic database i've constructed to support the assignment of records from British mite research, and help generate a national species list. Of the 2479 species of acari thought to be in the UK, i have amassed records of at least one observation of 1653 of these. The remaining species have been listed in more general documents (e.g. international reviews of a taxon group which notes “Great Britain” as a known location, or attempts at past species lists where the sources of the observations aren’t clear.  There are probably also some, like Hermannia scabra, which have been recorded under this name, but all of whose records have been proven to be likely to refer to Hermannia nodosa – I may remove these from the list in due course.  All this data, and other data mentioned below, are currently in an Excel spreadsheet.
+With effort from staff and volunteers, a total of 25,000 records of acari observed in Great Britain, and every entry has now been matched to a valid scientific name according a synonymic taxonomic database i've constructed to support the assignment of records from British mite research, and help generate a national species list. Of the 2479 species of acari thought to be in the UK, i have amassed records of at least one observation of 1653 of these. The remaining species have been listed in more general documents (e.g. international reviews of a taxon group which notes “Great Britain” as a known location, or attempts at past species lists where the sources of the observations aren’t clear.  There are probably also some, like Hermannia scabra, which have been recorded under this name, but all of whose records have been proven to be likely to refer to Hermannia nodosa – I may remove these from the list in due course.  All this data, and other data mentioned below, are currently in an Excel spreadsheet.
 
 This project aims to use these 2 datasets to form the basis of an online database which will allow people to view and map British observations of acari, at a range of taxonomic levels, download data, view information about species found together in the same sample, view or download photographs of identified specimens, view taxonomic information about the species (other names applied to this species in the UK), get references, or even link to downloadable documents, relating to the species, its observations identification and taxonomy.  The database should also allow superusers to update taxonomic relationships, add additional records, or add other information to the database.  The database should be compatible with, and ideally linked to, the NBN atlas, the UK species inventory and the GBIF.
 
@@ -224,3 +222,5 @@ Paste the following code into database.py (adjust the password on line 6 if your
 Create a html file in Aphalolgia_Web called index.html
 
 [index.html](index.html)
+
+At this point [main.py](main.py) was updated to give an interactive map on [http://127.0.0.1:8000](http://127.0.0.1:8000)
