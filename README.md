@@ -322,3 +322,5 @@ Here's the plan for taxonomy.html, explained before the code so the structure ma
 * Synonyms get their own visually distinct branch — slightly greyed out, italic, with a small "synonym of" label, and no expand arrow of their own (since your data model doesn't nest synonyms further) — exactly the "slightly separated set of branches" you described.
 * Clicking the name itself (not the triangle) selects that taxon and loads its full details into a panel on the right, via /api/v1/taxonomy/detail/{taxon_id}.
 * A "View on map" button in the details panel links across to your existing map page, pre-filtered to that taxon — this needs one small addition to index.html too (reading a taxon_id from the page's URL when it loads), which I'll give you afterwards.
+
+A small adjustment to the original script in line 238 allowed clicking on the arrows to instantly retrieve and disply child taxa for the 
