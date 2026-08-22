@@ -321,6 +321,36 @@ Here's the plan for taxonomy.html, explained before the code so the structure ma
 * Left side: the tree. It starts by loading Animalia (via /api/v1/taxonomy/root). Each row has a small triangle (▶) if it has children and/or synonyms to show. Clicking the triangle asks the server for that taxon's children and synonyms and inserts them just below, indented — this is the "lazy loading" we discussed, so it only ever fetches what's actually being looked at.
 * Synonyms get their own visually distinct branch — slightly greyed out, italic, with a small "synonym of" label, and no expand arrow of their own (since your data model doesn't nest synonyms further) — exactly the "slightly separated set of branches" you described.
 * Clicking the name itself (not the triangle) selects that taxon and loads its full details into a panel on the right, via /api/v1/taxonomy/detail/{taxon_id}.
-* A "View on map" button in the details panel links across to your existing map page, pre-filtered to that taxon — this needs one small addition to index.html too (reading a taxon_id from the page's URL when it loads), which I'll give you afterwards.
+* A "View on map" button in the details panel links across to your existing map page, pre-filtered to that taxon — this needs one small addition to index.html too (reading a taxon_id from the page's URL when it loads).
 
-A small adjustment to the original script in line 238 allowed clicking on the arrows to instantly retrieve and disply child taxa for the 
+[taxonomy.html](taxonomy.html)
+
+A small adjustment to the original script in line 238 allowed clicking on the arrows to instantly retrieve and disply child taxa for the selected taxon.
+replacing 
+                `childrenContainer.style.display = expanded ? 'none' : 'block';`
+with
+                `childrenContainer.style.display = expanded ? 'block' : 'none';`
+
+An adjustment to the index.html file allowed it to display the taxon selected in the textbox on the mapping page (index.html) with these lines added to the section 
+`\\Build API URL with Query Parameters`
+
+```
+				fetch("/api/v1/taxonomy/detail/"+encodeURIComponent(taxonIdFromUrl)) // human written wow! fetches api taxon data
+							.then(function(response) { return response.json(); })  // not sure exactly what this line does but it doesnt work without it
+							.then(function(json) {document.getElementById("taxonSearch").value = json.scientificName}); // sets value in text box to the scientific name
+```
+
+## Adding a taxonomy search facility
+
+This feature needs three new pieces, working together:
+
+* A search endpoint on the backend — since the taxonomy table already holds accepted names, doubtful names, misapplied names, and synonyms all in one place, a single search naturally covers all of them. Basic boolean support is built in: separate alternative searches with the word "OR", and treat multiple words as "must all appear" (AND) by default — e.g. Carabodes minusculus finds names containing both words, Carabodes OR Chamobates finds either. A full boolean parser (nested brackets, NOT, etc.) was not built due to complexity but remains a possibility for later extensions if needed.
+* A "path" endpoint — given any taxonID (including a synonym's), this works out the chain of tree branches that need to be opened, from Animalia down to that taxon, so the tree can auto-expand to reveal it.
+* Frontend changes — a search box with a live dropdown, and logic to walk that chain, opening each branch in turn, before highlighting the result.
+
+### Get ancestor chain
+Purpose: Given any taxonID — including a synonym's — returns the ordered list of taxonIDs from the top of the tree (e.g. Animalia) down to the hierarchical taxon that needs to be expanded to reveal it. If the given taxon is itself a synonym or pinned misapplication, the chain resolves to its accepted name's position in the hierarchy first, since that's where it's displayed (in the separated synonyms branch underneath). This is then used to auto-expand the taxonomy tree to a search result.
+
+[Query-4get_ancestor_chain.sql](Query-4get_ancestor_chain)
+
+
