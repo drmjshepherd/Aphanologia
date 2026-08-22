@@ -1,8 +1,9 @@
-#main.py
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from typing import Optional
 from database import get_db_connection
 import json
+import os
 
 app = FastAPI(
     title="Aphanologia Acari Portal API",
@@ -10,14 +11,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-@app.get("/")
-def home():
-    return {
-        "system": "Aphanologia Biological Recording Portal",
-        "status": "Online (Local Development Environment)",
-        "scope": "Acari of the United Kingdom",
-        "database": "PostgreSQL / PostGIS (Aphanologia)"
-    }
+# Serve the Interactive Web Map on Home Page
+@app.get("/", response_class=FileResponse)
+def serve_map():
+    return FileResponse("index.html")
 
 @app.get("/api/v1/observations/geojson")
 def get_observations_geojson(
@@ -32,7 +29,6 @@ def get_observations_geojson(
     cursor = conn.cursor()
 
     try:
-        # SQL aligned to exact table schema
         sql = """
             SELECT 
                 o."observationID",
@@ -90,5 +86,4 @@ def get_observations_geojson(
         raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
     finally:
         cursor.close()
-        conn.close()Start the local server with Uvicorn
-uvicorn main:app --reload
+        conn.close()
