@@ -8,13 +8,43 @@
     <style>
         body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        #header h1 { margin: 0; font-size: 1.2rem; }
-        #header a { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #header h1 { margin: 0; font-size: 1.2rem; white-space: nowrap; }
+        #header a { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; white-space: nowrap; }
         #header a:hover { text-decoration: underline; }
+
+        /* Search box + dropdown, sitting in the header */
+        #search-wrapper { position: relative; margin-left: auto; }
+        #taxonSearchBox {
+            width: 340px;
+            padding: 7px 10px;
+            border-radius: 4px;
+            border: none;
+            font-size: 0.9rem;
+        }
+        #search-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            color: #212529;
+            border: 1px solid #ced4da;
+            border-top: none;
+            max-height: 320px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        #search-dropdown.visible { display: block; }
+        .search-result-row { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.9rem; }
+        .search-result-row:hover { background: #e9ecef; }
+        .search-result-row .sci-name { font-style: italic; color: #1b4332; }
+        .search-result-row .rank-tag, .search-result-row .status-tag { font-size: 0.75rem; color: #868e96; margin-left: 6px; }
+        .search-no-results { padding: 8px 10px; color: #adb5bd; font-style: italic; font-size: 0.85rem; }
 
         #container { display: flex; height: calc(100vh - 50px); }
 
-        /* LEFT: the tree */
         #tree-panel {
             width: 55%;
             overflow-y: auto;
@@ -23,7 +53,6 @@
             border-right: 1px solid #dee2e6;
         }
 
-        /* RIGHT: the details panel for whichever taxon is selected */
         #detail-panel {
             width: 45%;
             padding: 20px;
@@ -32,7 +61,6 @@
             overflow-y: auto;
         }
 
-        /* One row in the tree = one taxon */
         .tree-node { margin: 2px 0; }
         .node-row {
             display: flex;
@@ -44,7 +72,6 @@
         .node-row:hover { background: #e9ecef; }
         .node-row.selected { background: #d8f3dc; }
 
-        /* The little triangle used to expand/collapse a branch */
         .toggle-arrow {
             width: 16px;
             display: inline-block;
@@ -70,18 +97,17 @@
         .status-doubtful { background: #e8a33d; }
         .status-misapplied { background: #c1666b; }
 
-        /* Children of a node get indented under it */
         .children-container { margin-left: 22px; }
 
-        /* Synonyms are visually separated: greyer, further indented, small label */
         .synonyms-container { margin-left: 22px; padding-left: 10px; border-left: 2px dotted #ced4da; }
-        .synonym-row { display: flex; align-items: center; padding: 2px 4px; color: #868e96; }
+        .synonym-row { display: flex; align-items: center; padding: 2px 4px; color: #868e96; cursor: pointer; border-radius: 3px; }
+        .synonym-row:hover { background: #e9ecef; }
+        .synonym-row.selected { background: #d8f3dc; }
         .synonym-row .sci-name { color: #868e96; }
         .synonym-label { font-size: 0.7rem; color: #adb5bd; margin-left: 6px; }
 
         .loading-text { color: #adb5bd; font-size: 0.8rem; margin-left: 22px; font-style: italic; }
 
-        /* Details panel styling */
         #detail-panel h2 { color: #1b4332; font-style: italic; margin-bottom: 0; }
         #detail-panel .detail-authorship { color: #6c757d; margin-top: 4px; margin-bottom: 20px; }
         #detail-panel .detail-row { margin-bottom: 12px; }
@@ -105,7 +131,13 @@
 <body>
     <div id="header">
         <h1>Aphanologia: Taxonomy Browser</h1>
-        <a href="/">← Back to map</a>
+
+        <div id="search-wrapper">
+            <input type="text" id="taxonSearchBox" placeholder="Search taxon or synonym (min 3 letters)... try 'X OR Y'" autocomplete="off">
+            <div id="search-dropdown"></div>
+        </div>
+
+        <a href="/">Back to map</a>
     </div>
 
     <div id="container">
@@ -113,25 +145,28 @@
             <div id="tree-root"><span class="loading-text">Loading...</span></div>
         </div>
         <div id="detail-panel">
-            <p class="placeholder">Click a name in the tree to see its details here.</p>
+            <p class="placeholder">Click a name in the tree to see its details here, or search above.</p>
         </div>
     </div>
 
     <script>
         // ----------------------------------------------------------------
-        // This section builds the tree. Each "node" (row) in the tree
-        // is a small <div>. We never build the whole tree at once —
-        // we only fetch and draw a taxon's children/synonyms the moment
-        // someone clicks its expand arrow. This keeps the page fast
-        // even though the full UK acari taxonomy has thousands of entries.
+        // nodeRegistry keeps a note of every row currently drawn in the
+        // tree, keyed by taxonID, so that a search result can find and
+        // open the right branch even though the tree itself is built
+        // lazily (only what's been clicked open actually exists yet).
+        //
+        // Each entry looks like:
+        //   { row: <the DOM element for this row>,
+        //     ensureExpanded: <async function, or null for synonyms> }
         // ----------------------------------------------------------------
+        const nodeRegistry = {};
 
-        // Builds one row (for either a "real" taxon or, separately, a synonym)
+        // Builds one row (used for both ordinary taxa and synonyms)
         function buildNodeRow(taxon, isSynonym) {
             const row = document.createElement('div');
             row.className = isSynonym ? 'synonym-row' : 'node-row';
 
-            // The expand arrow: only clickable/visible if there's something to expand
             const canExpand = !isSynonym && (taxon.has_children || taxon.has_synonyms);
             const arrow = document.createElement('span');
             arrow.className = 'toggle-arrow' + (canExpand ? '' : ' empty');
@@ -155,8 +190,6 @@
                 row.appendChild(rankSpan);
             }
 
-            // Flag doubtful/misapplied status visibly, since these need
-            // a bit of caution when interpreting the record
             if (taxon.taxonomic_status === 'doubtful') {
                 const badge = document.createElement('span');
                 badge.className = 'status-badge status-doubtful';
@@ -176,11 +209,16 @@
                 row.appendChild(label);
             }
 
+            // Selecting a row (clicking its name/text) always shows its
+            // details on the right - works the same for a real taxon
+            // or a synonym row
+            row.addEventListener('click', () => selectNode(taxon.taxon_id));
+
             return { row, arrow, canExpand };
         }
 
-        // Builds a full node: its row, plus (empty, for now) containers
-        // below it ready to receive children and synonyms once expanded
+        // Builds a full expandable node: its row, plus containers below
+        // it ready to receive children/synonyms once opened
         function buildTreeNode(taxon) {
             const wrapper = document.createElement('div');
             wrapper.className = 'tree-node';
@@ -193,72 +231,92 @@
             childrenContainer.style.display = 'none';
             wrapper.appendChild(childrenContainer);
 
-            let expanded = false;
             let loaded = false;
+            let open = false;
 
-            async function expandNode() {
-                if (!loaded) {
-                    childrenContainer.innerHTML = '<span class="loading-text">Loading...</span>';
-                    childrenContainer.style.display = 'block';
+            async function loadChildrenIfNeeded() {
+                if (loaded) return;
+                childrenContainer.innerHTML = '<span class="loading-text">Loading...</span>';
+                childrenContainer.style.display = 'block';
 
-                    // Fetch children (if any) and synonyms (if any) in parallel
-                    const requests = [];
-                    if (taxon.has_children) {
-                        requests.push(fetch(`/api/v1/taxonomy/children/${taxon.taxon_id}`).then(r => r.json()));
-                    } else {
-                        requests.push(Promise.resolve({ children: [] }));
-                    }
-                    if (taxon.has_synonyms) {
-                        requests.push(fetch(`/api/v1/taxonomy/synonyms/${taxon.taxon_id}`).then(r => r.json()));
-                    } else {
-                        requests.push(Promise.resolve({ synonyms: [] }));
-                    }
+                const requests = [];
+                requests.push(
+                    taxon.has_children
+                        ? fetch(`/api/v1/taxonomy/children/${taxon.taxon_id}`).then(r => r.json())
+                        : Promise.resolve({ children: [] })
+                );
+                requests.push(
+                    taxon.has_synonyms
+                        ? fetch(`/api/v1/taxonomy/synonyms/${taxon.taxon_id}`).then(r => r.json())
+                        : Promise.resolve({ synonyms: [] })
+                );
 
-                    const [childrenData, synonymsData] = await Promise.all(requests);
-                    childrenContainer.innerHTML = '';
+                const [childrenData, synonymsData] = await Promise.all(requests);
+                childrenContainer.innerHTML = '';
 
-                    // Draw real hierarchical children (each one is itself expandable)
-                    childrenData.children.forEach(child => {
-                        childrenContainer.appendChild(buildTreeNode(child));
+                childrenData.children.forEach(child => {
+                    childrenContainer.appendChild(buildTreeNode(child));
+                });
+
+                if (synonymsData.synonyms.length > 0) {
+                    const synContainer = document.createElement('div');
+                    synContainer.className = 'synonyms-container';
+                    synonymsData.synonyms.forEach(syn => {
+                        const { row: synRow } = buildNodeRow(syn, true);
+                        synContainer.appendChild(synRow);
+                        // Register the synonym too, so search can select it
+                        nodeRegistry[syn.taxon_id] = { row: synRow, ensureExpanded: null };
                     });
-
-                    // Draw synonyms as a visually separate block underneath
-                    if (synonymsData.synonyms.length > 0) {
-                        const synContainer = document.createElement('div');
-                        synContainer.className = 'synonyms-container';
-                        synonymsData.synonyms.forEach(syn => {
-                            const { row: synRow } = buildNodeRow(syn, true);
-                            synContainer.appendChild(synRow);
-                        });
-                        childrenContainer.appendChild(synContainer);
-                    }
-
-                    loaded = true;
+                    childrenContainer.appendChild(synContainer);
                 }
-                childrenContainer.style.display = expanded ? 'block' : 'none';
+
+                loaded = true;
+            }
+
+            // Opens this branch (loading its contents first if needed).
+            // Safe to call repeatedly - does nothing if already open.
+            async function setOpen(shouldOpen) {
+                if (shouldOpen && !loaded) {
+                    await loadChildrenIfNeeded();
+                }
+                open = shouldOpen;
+                arrow.classList.toggle('open', open);
+                childrenContainer.style.display = open ? 'block' : 'none';
             }
 
             if (canExpand) {
                 arrow.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    expanded = !expanded;
-                    arrow.classList.toggle('open', expanded);
-                    expandNode();
+                    setOpen(!open); // manual click: toggle open/closed
                 });
             }
 
-            // Clicking the name (not the arrow) selects the taxon and
-            // shows its details on the right
-            row.addEventListener('click', () => {
-                document.querySelectorAll('.node-row.selected').forEach(el => el.classList.remove('selected'));
-                row.classList.add('selected');
-                loadDetail(taxon.taxon_id);
-            });
+            // Used by the search feature: always opens, never closes,
+            // and does nothing if this branch is already open
+            async function ensureExpanded() {
+                if (!open) {
+                    await setOpen(true);
+                }
+            }
+
+            nodeRegistry[taxon.taxon_id] = { row, ensureExpanded: canExpand ? ensureExpanded : null };
 
             return wrapper;
         }
 
-        // Loads the full detail view for a taxon into the right-hand panel
+        // Highlights a row (by taxonID) and loads its details - used
+        // both by ordinary clicks and by search selection
+        function selectNode(taxonId) {
+            document.querySelectorAll('.node-row.selected, .synonym-row.selected')
+                .forEach(el => el.classList.remove('selected'));
+            const entry = nodeRegistry[taxonId];
+            if (entry) {
+                entry.row.classList.add('selected');
+                entry.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            loadDetail(taxonId);
+        }
+
         async function loadDetail(taxonId) {
             const panel = document.getElementById('detail-panel');
             panel.innerHTML = '<p class="loading-text">Loading...</p>';
@@ -308,8 +366,6 @@
             }
         }
 
-        // On page load: fetch the root (Animalia) and draw it as the
-        // starting point of the tree
         async function loadRoot() {
             const rootContainer = document.getElementById('tree-root');
             try {
@@ -325,6 +381,85 @@
         }
 
         loadRoot();
+
+        // ----------------------------------------------------------------
+        // SEARCH: text box + live dropdown, and the logic to open the
+        // tree down to whatever the user picks.
+        // ----------------------------------------------------------------
+        const searchBox = document.getElementById('taxonSearchBox');
+        const dropdown = document.getElementById('search-dropdown');
+        let searchDebounceTimer = null;
+
+        searchBox.addEventListener('input', () => {
+            clearTimeout(searchDebounceTimer);
+            const query = searchBox.value.trim();
+            if (query.length < 3) {
+                dropdown.classList.remove('visible');
+                dropdown.innerHTML = '';
+                return;
+            }
+            // Wait a moment after typing stops, rather than searching
+            // on every single keystroke
+            searchDebounceTimer = setTimeout(() => runSearch(query), 300);
+        });
+
+        async function runSearch(query) {
+            try {
+                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=15`);
+                const data = await res.json();
+                dropdown.innerHTML = '';
+
+                if (data.results.length === 0) {
+                    dropdown.innerHTML = '<div class="search-no-results">No matching taxa found</div>';
+                } else {
+                    data.results.forEach(t => {
+                        const row = document.createElement('div');
+                        row.className = 'search-result-row';
+                        row.innerHTML = `
+                            <span class="sci-name">${t.scientific_name}</span>
+                            <span class="rank-tag">${t.taxon_rank}</span>
+                            <span class="status-tag">${t.taxonomic_status}</span>
+                        `;
+                        row.addEventListener('click', () => {
+                            dropdown.classList.remove('visible');
+                            searchBox.value = t.scientific_name;
+                            goToTaxon(t.taxon_id);
+                        });
+                        dropdown.appendChild(row);
+                    });
+                }
+                dropdown.classList.add('visible');
+            } catch (err) {
+                dropdown.innerHTML = '<div class="search-no-results">Search failed</div>';
+                dropdown.classList.add('visible');
+            }
+        }
+
+        // Given a taxonID (possibly a synonym), fetches the path from
+        // the top of the tree down to it, opens every branch along that
+        // path in order (root first), then highlights and shows details
+        // for the actual selected taxon
+        async function goToTaxon(taxonId) {
+            const res = await fetch(`/api/v1/taxonomy/path/${encodeURIComponent(taxonId)}`);
+            if (!res.ok) return;
+            const data = await res.json();
+
+            for (const id of data.chain) {
+                const entry = nodeRegistry[id];
+                if (entry && entry.ensureExpanded) {
+                    await entry.ensureExpanded();
+                }
+            }
+
+            selectNode(taxonId);
+        }
+
+        // Close the dropdown if the user clicks anywhere else on the page
+        document.addEventListener('click', (e) => {
+            if (!document.getElementById('search-wrapper').contains(e.target)) {
+                dropdown.classList.remove('visible');
+            }
+        });
     </script>
 </body>
 </html>
