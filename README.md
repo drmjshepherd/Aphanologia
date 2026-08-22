@@ -128,9 +128,11 @@ The following script checks for duplicates in the primary key
 
 ### Upload data to databse
 Checked records were into the database Aphanologia using this import script
+
 [upload_acres_db.py](upload_acres_db.py)
 
 This produced the following output:
+```
 Connecting to database 'Aphanologia'...
 
 ✓ Connected successfully. PostGIS extension & ENUM types verified.
@@ -212,7 +214,6 @@ C:\path\to\folder\AcariUKDatabase\upload_acres_db.py:76: FutureWarning: DataFram
   ✓ Uploaded 73 rows into table 'observation_literature_junction'.
 
 
-
 Structuring relational constraints and spatial geometries...
 
   • Generating BNG (EPSG:27700) and WGS84 (EPSG:4326) PostGIS geometries...
@@ -230,23 +231,12 @@ Structuring relational constraints and spatial geometries...
 All 9 tables, PostGIS points, and Foreign Keys are live.
 
 ==========================================
+```
 
+This verification script was run as an SQL query in pgAdmin 4
 
-Ran this verification script as an SQL query in pgAdmin 4
-SELECT 
-    'samples' AS table_name, 
-    COUNT(*) AS total_rows, 
-    COUNT(geom_bng) AS bng_geoms_built, 
-    COUNT(geom_wgs84) AS wgs_geoms_built 
-FROM samples
-UNION ALL
-SELECT 'observations', COUNT(*), NULL, NULL FROM observations
-UNION ALL
-SELECT 'observation_demographics', COUNT(*), NULL, NULL FROM observation_demographics
-UNION ALL
-SELECT 'taxonomy', COUNT(*), NULL, NULL FROM taxonomy
-UNION ALL
-SELECT 'literature', COUNT(*), NULL, NULL FROM literature;
+[verify_database_structure.sql](verify_database_structure.sql)
+
 This produced the output:
 "table_name"	"total_rows"	"bng_geoms_built"	"wgs_geoms_built"
 "literature"	375		
