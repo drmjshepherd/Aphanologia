@@ -374,7 +374,13 @@ and adding 2 new functions:
     down to the hierarchical node that the front-end tree needs to
     expand to reveal it. Wraps get_ancestor_chain() (Query-4).
 
-Where's the script for this?
+A query was built in SQL to fetch the ancestor chain for any taxon selected using the search box:
+
+[Query-4get_ancestor_chain.sql](Query-4get_ancestor_chain.sql)
+
+
+## Fixing Date Filtering
+
 
 ## Linking images from a taxonomically-arranged image archive
 The following script was run to walk through an archive of images where folders have been arranged in taxonomic rank, and individual specimen photos stored within appropriate folders for their level of identification.
