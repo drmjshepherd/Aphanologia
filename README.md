@@ -456,9 +456,128 @@ The landing page html was created:
 [landing.html](landing.html)
 
 ## Fixing Date Filtering
+Dates were in plain text YYYY-MM-DD and the date filter on the map wasn't working.  Diagnostics were run in SQL to check the nature of the data.
 
+the get_observations_geojson function in main.py was replaced with this to allow working date selection:
+```
+@app.get("/api/v1/observations/geojson")
+def get_observations_geojson(
+    limit: int = Query(5000, description="Maximum number of spatial points to return", ge=1, le=50000),
+    taxon_id: Optional[str] = Query(None, description="Filter records to this taxon and everything beneath it (families, genera, species, synonyms, etc.)"),
+    taxon_name: Optional[str] = Query(None, description="[Legacy] Filter records by plain text match on scientific name. Prefer taxon_id where possible."),
+    start_year: Optional[int] = Query(None, description="Filter records from this year onward"),
+    end_year: Optional[int] = Query(None, description="Filter records up to this year")
+):
+    """
+    Queries PostGIS and converts sample/observation points into a
+    GeoJSON FeatureCollection.
+
+    Date filtering note: earliestDateCollected / latestDateCollected
+    are stored as TEXT (not a true date type), specifically so that
+    dates before 1900 can be recorded without issue. They are always
+    in YYYY-MM-DD format, so the year is reliably the first 4
+    characters - we compare on that directly rather than using
+    Postgres's date functions, which only work on genuine date columns.
+
+    Some records only have one of the two date fields filled in
+    (e.g. an old record dated only "by 1927"). To avoid silently
+    excluding these, we treat whichever date IS present as standing
+    in for the other when checking for an overlap with the
+    requested year range.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        sql = """
+            SELECT
+                veo."observationID",
+                veo."resolved_scientific_name" AS "scientificName",
+                veo."resolved_taxon_rank" AS "taxonrank",
+                veo."eventID",
+                s."earliestDateCollected",
+                s."latestDateCollected",
+                s."samplingLocation",
+                s."gridRef",
+                ST_AsGeoJSON(s.geom_wgs84)::json AS geometry
+            FROM view_effective_observations veo
+            JOIN samples s ON veo."eventID" = s."eventID"
+            WHERE s.geom_wgs84 IS NOT NULL
+        """
+        params = []
+
+        if taxon_id and taxon_id.strip():
+            sql += """ AND veo.resolved_taxon_id IN (
+                SELECT taxon_id FROM get_descendant_taxon_ids(%s)
+            )"""
+            params.append(taxon_id.strip())
+        elif taxon_name and taxon_name.strip():
+            sql += " AND veo.\"resolved_scientific_name\" ILIKE %s"
+            params.append(f"%{taxon_name.strip()}%")
+
+        if start_year:
+            # Include the record if its LATEST known date is on or
+            # after the requested start year. Falls back to the
+            # earliest date if latest is blank.
+            sql += """ AND CAST(
+                LEFT(COALESCE(NULLIF(s."latestDateCollected", ''), NULLIF(s."earliestDateCollected", '')), 4)
+                AS INTEGER
+            ) >= %s"""
+            params.append(start_year)
+
+        if end_year:
+            # Include the record if its EARLIEST known date is on or
+            # before the requested end year. Falls back to the
+            # latest date if earliest is blank.
+            sql += """ AND CAST(
+                LEFT(COALESCE(NULLIF(s."earliestDateCollected", ''), NULLIF(s."latestDateCollected", '')), 4)
+                AS INTEGER
+            ) <= %s"""
+            params.append(end_year)
+
+        sql += " LIMIT %s;"
+        params.append(limit)
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+
+        features = []
+        for row in rows:
+            if row["geometry"]:
+                feature = {
+                    "type": "Feature",
+                    "geometry": row["geometry"],
+                    "properties": {
+                        "observationID": row["observationID"],
+                        "scientificName": row["scientificName"],
+                        "taxonRank": row["taxonrank"],
+                        "eventID": row["eventID"],
+                        "earliestDate": row["earliestDateCollected"],
+                        "latestDate": row["latestDateCollected"],
+                        "samplingLocation": row["samplingLocation"],
+                        "gridRef": row["gridRef"]
+                    }
+                }
+                features.append(feature)
+
+        return {
+            "type": "FeatureCollection",
+            "count": len(features),
+            "features": features
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+```
 
 ## Linking images from a taxonomically-arranged image archive
 The following script was run to walk through an archive of images where folders have been arranged in taxonomic rank, and individual specimen photos stored within appropriate folders for their level of identification.
 
  [catalogue_image_archive.py](catalogue_image_archive.py) 
+
+ On the basis of this it was decided to create an extension to the database's observation_media table to allow media to be linked at various levels, whetner sample, observation, observation demographic, specimen or taxon.  This was acheived with a SQL query:
+
+ [Migration-4extend_observation_media.sql](Migration-4extend_observation_media.sql)
+
+ 
