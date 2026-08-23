@@ -1,7 +1,12 @@
-Add enteredBy/enteredOn columns to observations/samples, import from your spreadsheet
-Misapplied-vs-misspelling data-entry errors in the taxonomy table (at least 6 confirmed)
-Negative BNG values causing broken grid refs for Channel Islands samples
-Sample count discrepancy investigation (470 vs ~260 pre-1900, never fully chased down)
-Folder/taxonomy naming convention differences (Zhang et al. vs. older higher-taxon names)
-~15% of archive photos still in "needs attention" (typos, new-to-UK species not yet added, one genuinely disputed ID)
-Eventually: full paginated gallery view (beyond the 8-photo preview), photo voting/popularity ranking, real cloud hosting when going public
+* Add enteredBy/enteredOn columns to observations/samples, import from your spreadsheet
+* Misapplied-vs-misspelling data-entry errors in the taxonomy table (at least 6 confirmed)
+* Negative BNG values causing broken grid refs for Channel Islands samples
+* Sample count discrepancy investigation (470 vs ~260 pre-1900, never fully chased down)
+* Folder/taxonomy naming convention differences (Zhang et al. vs. older higher-taxon names)
+* ~15% of archive photos still in "needs attention" (typos, new-to-UK species not yet added, one genuinely disputed ID)
+* Eventually: full paginated gallery view (beyond the 8-photo preview), photo voting/popularity ranking, real cloud hosting when going public
+* centre map on england, not S england
+* look into cloudfare 2 for hosting
+* fuzzy matching (not boolean!) for taxonomy and map search boxes.
+* drop down menu for map search boxes
+* "View full gallery" - photos clicked on links to observations view
