@@ -12,6 +12,10 @@ app = FastAPI(
 )
 
 @app.get("/", response_class=FileResponse)
+def serve_landing():
+    return FileResponse("landing.html")
+
+@app.get("/map", response_class=FileResponse)
 def serve_map():
     return FileResponse("index.html")
 
@@ -263,16 +267,18 @@ def get_observations_geojson(
     Queries PostGIS and converts sample/observation points into a
     GeoJSON FeatureCollection.
 
-    Two ways to filter by taxon:
-      - taxon_id: the 'proper' way. Uses get_descendant_taxon_ids()
-        (Query-1) to expand the chosen taxon out to every species
-        and synonym beneath it, then returns observations of any
-        of them. Also now resolves each observation through
-        view_effective_observations, so manually-corrected
-        misapplications and synonyms show up under their correct
-        current name rather than the name originally written down.
-      - taxon_name: kept for backwards compatibility with the
-        existing map page; does a simple text search instead.
+    Date filtering note: earliestDateCollected / latestDateCollected
+    are stored as TEXT (not a true date type), specifically so that
+    dates before 1900 can be recorded without issue. They are always
+    in YYYY-MM-DD format, so the year is reliably the first 4
+    characters - we compare on that directly rather than using
+    Postgres's date functions, which only work on genuine date columns.
+
+    Some records only have one of the two date fields filled in
+    (e.g. an old record dated only "by 1927"). To avoid silently
+    excluding these, we treat whichever date IS present as standing
+    in for the other when checking for an overlap with the
+    requested year range.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -304,11 +310,23 @@ def get_observations_geojson(
             params.append(f"%{taxon_name.strip()}%")
 
         if start_year:
-            sql += " AND EXTRACT(YEAR FROM s.\"earliestDateCollected\") >= %s"
+            # Include the record if its LATEST known date is on or
+            # after the requested start year. Falls back to the
+            # earliest date if latest is blank.
+            sql += """ AND CAST(
+                LEFT(COALESCE(NULLIF(s."latestDateCollected", ''), NULLIF(s."earliestDateCollected", '')), 4)
+                AS INTEGER
+            ) >= %s"""
             params.append(start_year)
 
         if end_year:
-            sql += " AND EXTRACT(YEAR FROM s.\"earliestDateCollected\") <= %s"
+            # Include the record if its EARLIEST known date is on or
+            # before the requested end year. Falls back to the
+            # latest date if earliest is blank.
+            sql += """ AND CAST(
+                LEFT(COALESCE(NULLIF(s."earliestDateCollected", ''), NULLIF(s."latestDateCollected", '')), 4)
+                AS INTEGER
+            ) <= %s"""
             params.append(end_year)
 
         sql += " LIMIT %s;"
@@ -328,8 +346,8 @@ def get_observations_geojson(
                         "scientificName": row["scientificName"],
                         "taxonRank": row["taxonrank"],
                         "eventID": row["eventID"],
-                        "earliestDate": str(row["earliestDateCollected"]) if row["earliestDateCollected"] else None,
-                        "latestDate": str(row["latestDateCollected"]) if row["latestDateCollected"] else None,
+                        "earliestDate": row["earliestDateCollected"],
+                        "latestDate": row["latestDateCollected"],
                         "samplingLocation": row["samplingLocation"],
                         "gridRef": row["gridRef"]
                     }
