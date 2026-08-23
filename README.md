@@ -638,3 +638,7 @@ a users table was created in sql running
 
 A login code section was added to [main.py](main.py)
 
+I set up myself as a superuser using this script in sql
+
+`UPDATE users SET role = 'superuser' WHERE email = 'your.email@example.com';`
+
