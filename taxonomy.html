@@ -115,6 +115,14 @@
         #detail-panel .detail-label { font-weight: 600; font-size: 0.8rem; color: #2d6a4f; text-transform: uppercase; }
         #detail-panel .detail-value { font-size: 0.95rem; }
         #detail-panel .placeholder { color: #adb5bd; font-style: italic; }
+		#photo-gallery { margin-top: 20px; }
+        #photo-gallery .gallery-heading { font-weight: 600; font-size: 0.8rem; color: #2d6a4f; text-transform: uppercase; margin-bottom: 8px; }
+        #photo-gallery .lead-photo { width: 100%; max-width: 320px; border-radius: 6px; display: block; margin-bottom: 8px; cursor: pointer; }
+        #photo-gallery .thumb-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; max-width: 320px; }
+        #photo-gallery .thumb-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; cursor: pointer; }
+        #photo-gallery .more-photos-btn { margin-top: 8px; background: none; border: 1px solid #2d6a4f; color: #2d6a4f; padding: 6px 12px; font-size: 0.85rem; font-weight: normal; }
+        #photo-gallery .more-photos-btn:hover { background: #2d6a4f; color: white; }
+        #photo-gallery .no-photos { color: #adb5bd; font-style: italic; font-size: 0.85rem; }
 
         #view-on-map-btn {
             display: inline-block;
@@ -359,11 +367,45 @@
                         <div class="detail-label">Remarks</div>
                         <div class="detail-value">${t.taxonRemarks}</div>
                     </div>` : ''}
-
                     <a id="view-on-map-btn" href="/map?taxon_id=${t.taxonID}">View records on map</a>
+                    <div id="photo-gallery"><span class="loading-text">Loading photos...</span></div>
                 `;
+
+                loadPhotoGallery(t.taxonID);
             } catch (err) {
                 panel.innerHTML = '<p class="placeholder">Could not load details for this taxon.</p>';
+            }
+        }
+
+        async function loadPhotoGallery(taxonId) {
+            const gallery = document.getElementById('photo-gallery');
+            if (!gallery) return;
+
+            try {
+                const res = await fetch(`/api/v1/taxonomy/photos/${taxonId}?limit=8`);
+                const data = await res.json();
+
+                if (data.count === 0) {
+                    gallery.innerHTML = '<div class="gallery-heading">Photos</div><p class="no-photos">No photos catalogued for this taxon yet.</p>';
+                    return;
+                }
+
+                const [lead, ...thumbs] = data.photos;
+
+                gallery.innerHTML = `
+                    <div class="gallery-heading">Photos</div>
+                    <img class="lead-photo" src="/api/v1/media/${lead.media_id}"
+                         alt="${lead.caption || ''}"
+                         onclick="window.open('/api/v1/media/${lead.media_id}', '_blank')">
+                    <div class="thumb-grid">
+                        ${thumbs.map(p => `
+                            <img src="/api/v1/media/${p.media_id}" alt="${p.caption || ''}"
+                                 onclick="window.open('/api/v1/media/${p.media_id}', '_blank')">
+                        `).join('')}
+                    </div>
+                `;
+            } catch (err) {
+                gallery.innerHTML = '<div class="gallery-heading">Photos</div><p class="no-photos">Could not load photos.</p>';
             }
         }
 
