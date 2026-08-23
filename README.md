@@ -642,3 +642,9 @@ I set up myself as a superuser using this script in sql
 
 `UPDATE users SET role = 'superuser' WHERE email = 'your.email@example.com';`
 
+## Setting up new data submissions
+### Individual record submissions
+The database structure was updated to allow for new data to be submitted with user info using this sql query
+
+[Migration-6submission_tracking_columns.sql](Migration-6submission_tracking_columns.sql)
+
