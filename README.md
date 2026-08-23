@@ -654,3 +654,8 @@ This script was run to correct the schema:
 
 [Migration-7fix_mistyped_text_columns_in_samples.sql](Migration-7fix_mistyped_text_columns_in_samples.sql)
 Purpose: samplingProtocol and samplesizeUnit were created as double precision rather than text, almost certainly because every row's value was blank at the time of the original bulk import, causing Pandas to infer a numeric type. Both columns are meant to hold free text (e.g. "Tullgren funnel", "cm3"). This converts them to text, matching their intended purpose, and is safe since — being all-null — there's no real numeric data to lose in the conversion.
+
+also same problem in observations.  ran this:
+
+[Migration-8fix_mistyped_text_columns_in_observations.sql](Migration-8fix_mistyped_text_columns_in_observations.sql)
+
