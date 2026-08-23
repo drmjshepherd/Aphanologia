@@ -659,3 +659,9 @@ also same problem in observations.  ran this:
 
 [Migration-8fix_mistyped_text_columns_in_observations.sql](Migration-8fix_mistyped_text_columns_in_observations.sql)
 
+At this point it was noticed that not all misapplied taxa had a valid acceptedNameUsageID.  This was because these had been populated using the marker "sensu Name" in the scientificNameAuthor field to indicate where a misapplication had happened.
+However, some such references were marked with no modifiers (just an author name or name and date), and others were marked "(lapsus) Name, date" or just "in Name, date" 
+
+This script was run to ensure that all the misapplications were treated at the same rank as synonyms, rather than as valid children int he taxonomy displays.
+
+[Migration-9backfill_acceptednameusage.sql](Migration-9backfill_acceptednameusage.sql)
