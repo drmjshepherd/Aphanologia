@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; }
+        #hero {
+            background: #1b4332;
+            color: white;
+            padding: 60px 20px 50px;
+            text-align: center;
+        }
+        #hero h1 { margin: 0 0 10px; font-size: 2.2rem; }
+        #hero p { max-width: 640px; margin: 0 auto; color: #b7e4c7; font-size: 1.05rem; line-height: 1.5; }
+        #cards {
+            max-width: 800px;
+            margin: -30px auto 40px;
+            padding: 0 20px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 25px;
+            width: 260px;
+            text-decoration: none;
+            color: inherit;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
+        .card h2 { color: #2d6a4f; font-size: 1.2rem; margin-top: 0; }
+        .card p { color: #495057; font-size: 0.9rem; line-height: 1.4; }
+        #about { max-width: 700px; margin: 0 auto 60px; padding: 0 20px; color: #495057; line-height: 1.6; }
+        #about h2 { color: #1b4332; font-size: 1.1rem; }
+    </style>
+</head>
+<body>
+    <div id="hero">
+        <h1>Aphanologia</h1>
+        <p>Knowledge of hidden things &mdash; an open database of British Acari records, taxonomy, and distribution.</p>
+    </div>
+
+    <div id="cards">
+        <a class="card" href="/map">
+            <h2>Distribution Map</h2>
+            <p>Explore mapped observations of UK Acari, filterable by taxon and date range.</p>
+        </a>
+        <a class="card" href="/taxonomy">
+            <h2>Taxonomy Browser</h2>
+            <p>Drill down through the full British Acari taxonomy, from Kingdom to species and synonym.</p>
+        </a>
+    </div>
+
+    <div id="about">
+        <h2>About this project</h2>
+        <p>
+            Aphanologia hosts data on Acari observed in Great Britain, built from decades of
+            fieldwork, literature review, and museum records. The database currently holds
+            around 25,000 observations, matched against a synonymic taxonomic reference
+            covering the known British Acari fauna.
+        </p>
+    </div>
+</body>
+</html>
