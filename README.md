@@ -378,6 +378,8 @@ A query was built in SQL to fetch the ancestor chain for any taxon selected usin
 
 [Query-4get_ancestor_chain.sql](Query-4get_ancestor_chain.sql)
 
+## Setting up landing page
+
 
 ## Fixing Date Filtering
 
