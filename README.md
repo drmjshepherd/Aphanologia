@@ -587,8 +587,14 @@ The following query was run in sql to ensure that all specimen, observation demo
 [View-1view_media_with_resolved_taxon.sql](View-1view_media_with_resolved_taxon.sql)
 Purpose: For every photo, works out its "effective" taxon by walking up the chain appropriate to its link_level — specimen → demographic → observation → resolved taxon (via view_effective_observations, so synonym/misapplication resolution applies here too); demographic → observation → taxon; observation → taxon directly; or the taxon_id itself if that's how it's linked. Sample-level photos resolve to no taxon at all, since a sample is a mixed community, not a single species.
 
-This python script was then run to import the media archive links:
+This python script was then run as a "dry run" to import the media archive links:
 
 [import_media_archive.py](import_media_archive.py)
 
+This was later updated to ensure that it was better able to identify "composite" labelled photos (in the filename) and make their display preferential.
 
+This script was run to backfill the already uploaded data to capture composite images
+
+[Migration-5backfill_captions-from_filenames.sql](Migration-5backfill_captions-from_filenames.sql)
+
+Purpose: The initial import stored each photo's specimen folder name as its caption. This updates every existing row to use the actual image filename instead (extension removed), so text-based filtering (e.g. finding "composite" images) works as intended, matching the same logic now used for new imports.
