@@ -376,9 +376,84 @@ and adding 2 new functions to [main.py](main.py):
 
 [taxonomy.html](taxonomy.html) was then updated to include a dropdown box
 
+The following script was added to the mapping page (then called index.html) to fetch the taxon name selected using the dropdown box and pass it to the textbox in the mapping page.
+
+```{html}
+fetch("/api/v1/taxonomy/detail/"+encodeURIComponent(taxonIdFromUrl))
+    .then(function(response) { return response.json(); })
+    .then(function(json) {document.getElementById("taxonSearch").value = json.scientificName});
+```
+A minor correction was made to ensure that a single click on the taxonomy hierarchy arrows resulted in the rapid display of child taxa, and to reduce the focus on Boolean options in the search box.
+
+Keyboard navigation for the searchbox menu was added to the taxonomy.html page with this script
+```
+        // Tracks which dropdown row is currently highlighted by the
+        // keyboard, so arrow keys can move it up/down and Enter can
+        // select whichever one is currently highlighted
+        let highlightedIndex = -1;
+
+        searchBox.addEventListener('input', () => {
+            clearTimeout(searchDebounceTimer);
+            highlightedIndex = -1;
+            const query = searchBox.value.trim();
+            if (query.length < 3) {
+                dropdown.classList.remove('visible');
+                dropdown.innerHTML = '';
+                return;
+            }
+            searchDebounceTimer = setTimeout(() => runSearch(query), 300);
+        });
+
+        // Moves the keyboard highlight to a specific row index,
+        // wrapping round at either end, and scrolls it into view
+        function setHighlighted(index) {
+            const rows = dropdown.querySelectorAll('.search-result-row');
+            if (rows.length === 0) return;
+            rows.forEach(r => r.classList.remove('kb-highlighted'));
+            highlightedIndex = (index + rows.length) % rows.length;
+            const row = rows[highlightedIndex];
+            row.classList.add('kb-highlighted');
+            row.scrollIntoView({ block: 'nearest' });
+        }
+
+        searchBox.addEventListener('keydown', (e) => {
+            const rows = dropdown.querySelectorAll('.search-result-row');
+            if (!dropdown.classList.contains('visible') || rows.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setHighlighted(highlightedIndex + 1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setHighlighted(highlightedIndex - 1);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (highlightedIndex >= 0) {
+                    rows[highlightedIndex].click();
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('visible');
+            }
+        });
+```
 
 ## Setting up landing page
+Header links to the landing page were inserted into the Taxonomy and Mapping broswer so that clicking on the word "Aphanologia" returns you to the landing page.
 
+[main.py](main.py) was adapted to include routing to the landing page:
+
+```
+@app.get("/", response_class=FileResponse)
+def serve_landing():
+    return FileResponse("landing.html")
+
+@app.get("/map", response_class=FileResponse)
+def serve_map():
+    return FileResponse("index.html")
+```
+The landing page html was created:
+
+[landing.html](landing.html)
 
 ## Fixing Date Filtering
 
