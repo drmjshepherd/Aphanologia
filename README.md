@@ -250,13 +250,21 @@ and inside this folder was created a virtual python environment in the command l
 python -m venv venv
 ```
 
-The environment activated in windows powershell:
+The environment activated in windows powershell - this needs setting up with the following packages :
 ```
 cd "C:\path\to\folder\AcariUKDatabase\Aphanologia_Web"
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 .\venv\Scripts\Activate.ps1
-pip install fastapi uvicorn asyncpg psycopg2-binary pydantic
+pip install fastapi uvicorn asyncpg psycopg2-binary pydantic sqlalchemy geoalchemy2 authlib itsdangerous python-dotenv httpx
 ```
+to log back into the virtual environment use these commands in powershell:
+```
+cd "C:\path\to\folder\AcariUKDatabase\Aphanologia_Web"
+.\venv\Scripts\Activate.ps1
+uvicorn main:app --reload
+```
+
+# Main database development
 A central python script was created in the folder Aphanologia_Web - this was subject to many updates during the process to provide links to new functions and scripts.
 
 [main.py](main.py)
