@@ -356,7 +356,7 @@ Purpose: Given any taxonID - including a synonym's - returns the ordered list of
 main.py was updated by adding new functions from
 `import re`
 
-and adding 2 new functions:
+and adding 2 new functions to [main.py](main.py):
 * one which Searches every taxon name in the database in one go - accepted
     names, doubtful names, misapplied names, and synonyms all live
     in the same taxonomy table, so this naturally covers all of them
@@ -374,9 +374,8 @@ and adding 2 new functions:
     down to the hierarchical node that the front-end tree needs to
     expand to reveal it. Wraps get_ancestor_chain() (Query-4).
 
-A query was built in SQL to fetch the ancestor chain for any taxon selected using the search box:
+[taxonomy.html](taxonomy.html) was then updated to include a dropdown box
 
-[Query-4get_ancestor_chain.sql](Query-4get_ancestor_chain.sql)
 
 ## Setting up landing page
 
