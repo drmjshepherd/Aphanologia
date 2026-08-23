@@ -4,6 +4,7 @@ from typing import Optional
 from database import get_db_connection
 import json
 import re
+import os
 
 app = FastAPI(
     title="Aphanologia Acari Portal API",
@@ -250,6 +251,103 @@ def get_taxonomy_path(taxon_id: str = Path(..., description="The taxonID to find
     finally:
         cursor.close()
         conn.close()
+        
+@app.get("/api/v1/taxonomy/photos/{taxon_id}")
+def get_taxonomy_photos(
+    taxon_id: str = Path(..., description="The taxonID to fetch a photo preview for"),
+    limit: int = Query(8, ge=1, le=30, description="Maximum number of preview photos to return")
+):
+    """
+    Returns a SMALL PREVIEW selection of photos for a taxon and
+    everything beneath it - intended for the details panel, not a
+    full gallery.
+
+    Selection preference: photos whose filename-derived caption
+    contains 'composite' (stacked focal-plane images, generally
+    clearer/more representative) are preferred; remaining slots are
+    filled with a random selection of the rest. This also caps how
+    many rows the database considers per request, so selecting a
+    huge group like Animalia stays cheap even though it may match
+    tens of thousands of photos.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            WITH descendant_taxa AS (
+                SELECT taxon_id FROM get_descendant_taxon_ids(%s)
+            ),
+            composites AS (
+                SELECT m.media_id, m.link_level, m.caption, m.photographer, m.community_votes
+                FROM view_media_with_resolved_taxon m
+                WHERE m.effective_taxon_id IN (SELECT taxon_id FROM descendant_taxa)
+                  AND m.caption ILIKE '%%composite%%'
+                ORDER BY m.community_votes DESC
+                LIMIT %s
+            ),
+            remainder AS (
+                SELECT m.media_id, m.link_level, m.caption, m.photographer, m.community_votes
+                FROM view_media_with_resolved_taxon m
+                WHERE m.effective_taxon_id IN (SELECT taxon_id FROM descendant_taxa)
+                  AND m.media_id NOT IN (SELECT media_id FROM composites)
+                ORDER BY random()
+                LIMIT %s
+            )
+            SELECT * FROM composites
+            UNION ALL
+            SELECT * FROM remainder
+            LIMIT %s;
+        """, (taxon_id, limit, limit, limit))
+        rows = cursor.fetchall()
+        return {"taxon_id": taxon_id, "count": len(rows), "photos": rows, "is_preview": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()       
+        
+# ===============================================================
+# MEDIA RETRIEVAL FROM IMAGE ARCHIVE FILE STRUCTURE
+# ===============================================================
+from fastapi.responses import FileResponse
+
+# The one place in the whole app that knows where image files actually
+# live right now. Currently: your local OneDrive-synced folder, which
+# Windows will transparently download from the cloud on first request
+# (no need to pre-download the whole 77GB archive). When hosting moves
+# to proper cloud storage later, only this function needs to change -
+# every URL the website already generated will keep working exactly
+# as before.
+MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
+
+@app.get("/api/v1/media/{media_id}")
+def get_media_file(media_id: int = Path(..., description="The media_id from observation_media")):
+    """
+    Serves the actual image file for a given photo record.
+    Looks up the stored relative path, then serves it from wherever
+    MEDIA_ROOT currently points.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT file_url FROM observation_media WHERE media_id = %s;', (media_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No such photo")
+
+        full_path = os.path.join(MEDIA_ROOT, row["file_url"])
+        if not os.path.isfile(full_path):
+            raise HTTPException(status_code=404, detail="Photo file not found on disk (may still be syncing from OneDrive, or the archive has moved)")
+
+        return FileResponse(full_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving media: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
 
 # ==========================================================
 # MAP / OBSERVATIONS ENDPOINT
