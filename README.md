@@ -166,15 +166,15 @@ All these tables are represented in a single excel spreadsheet saved to:
 C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx
 
 # Database setup
-I created the database Aphanologia (meaning knowledge of hidden things) using pgAdmin 4 and postGreSQL
+The database Aphanologia (meaning knowledge of hidden things) was created using pgAdmin 4 and postGreSQL
 (check older AI chats for details)
+
 ## Importing data
 ### Ensure Prerequisites
 Open Command Prompt (Win + R, type cmd, hit Enter) and ensure the necessary Python bridge packages are installed:
 ```
 pip install pandas openpyxl sqlalchemy psycopg2 geoalchemy2
 ```
-
 
 ### Duplicate Primary Key Finder Script
 The following script checks for duplicates in the primary key
@@ -264,8 +264,8 @@ cd "C:\path\to\folder\AcariUKDatabase\Aphanologia_Web"
 uvicorn main:app --reload
 ```
 
-# Main database development
-A central python script was created in the folder Aphanologia_Web - this was subject to many updates during the process to provide links to new functions and scripts.
+# Main database functions script
+A central python script containing all main database functions was created in the folder Aphanologia_Web. This was subject to many updates during the process to provide links to new functions and scripts.
 
 [main.py](main.py)
 
