@@ -41,7 +41,8 @@
         .search-result-row:hover { background: #e9ecef; }
         .search-result-row .sci-name { font-style: italic; color: #1b4332; }
         .search-result-row .rank-tag, .search-result-row .status-tag { font-size: 0.75rem; color: #868e96; margin-left: 6px; }
-        .search-no-results { padding: 8px 10px; color: #adb5bd; font-style: italic; font-size: 0.85rem; }
+        .search-result-row.kb-highlighted { background: #e9ecef; }
+		.search-no-results { padding: 8px 10px; color: #adb5bd; font-style: italic; font-size: 0.85rem; }
 
         #container { display: flex; height: calc(100vh - 50px); }
 
@@ -130,14 +131,14 @@
 </head>
 <body>
     <div id="header">
-        <h1>Aphanologia: Taxonomy Browser</h1>
+        <a href="/" style="color: white; text-decoration: none;"><h1>Aphanologia: Taxonomy Browser</h1></a>
 
         <div id="search-wrapper">
-            <input type="text" id="taxonSearchBox" placeholder="Search taxon or synonym (min 3 letters)... try 'X OR Y'" autocomplete="off">
+            <input type="text" id="taxonSearchBox" placeholder="Search taxon or synonym (min 3 letters)..." autocomplete="off">
             <div id="search-dropdown"></div>
         </div>
 
-        <a href="/">Back to map</a>
+        <a href="/map">Back to map</a>>
     </div>
 
     <div id="container">
@@ -359,7 +360,7 @@
                         <div class="detail-value">${t.taxonRemarks}</div>
                     </div>` : ''}
 
-                    <a id="view-on-map-btn" href="/?taxon_id=${t.taxonID}">View records on map</a>
+                    <a id="view-on-map-btn" href="/map?taxon_id=${t.taxonID}">View records on map</a>
                 `;
             } catch (err) {
                 panel.innerHTML = '<p class="placeholder">Could not load details for this taxon.</p>';
@@ -390,17 +391,53 @@
         const dropdown = document.getElementById('search-dropdown');
         let searchDebounceTimer = null;
 
+        // Tracks which dropdown row is currently highlighted by the
+        // keyboard, so arrow keys can move it up/down and Enter can
+        // select whichever one is currently highlighted
+        let highlightedIndex = -1;
+
         searchBox.addEventListener('input', () => {
             clearTimeout(searchDebounceTimer);
+            highlightedIndex = -1;
             const query = searchBox.value.trim();
             if (query.length < 3) {
                 dropdown.classList.remove('visible');
                 dropdown.innerHTML = '';
                 return;
             }
-            // Wait a moment after typing stops, rather than searching
-            // on every single keystroke
             searchDebounceTimer = setTimeout(() => runSearch(query), 300);
+        });
+
+        // Moves the keyboard highlight to a specific row index,
+        // wrapping round at either end, and scrolls it into view
+        function setHighlighted(index) {
+            const rows = dropdown.querySelectorAll('.search-result-row');
+            if (rows.length === 0) return;
+            rows.forEach(r => r.classList.remove('kb-highlighted'));
+            highlightedIndex = (index + rows.length) % rows.length;
+            const row = rows[highlightedIndex];
+            row.classList.add('kb-highlighted');
+            row.scrollIntoView({ block: 'nearest' });
+        }
+
+        searchBox.addEventListener('keydown', (e) => {
+            const rows = dropdown.querySelectorAll('.search-result-row');
+            if (!dropdown.classList.contains('visible') || rows.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setHighlighted(highlightedIndex + 1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setHighlighted(highlightedIndex - 1);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (highlightedIndex >= 0) {
+                    rows[highlightedIndex].click();
+                }
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('visible');
+            }
         });
 
         async function runSearch(query) {
