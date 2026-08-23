@@ -5,11 +5,38 @@ from database import get_db_connection
 import json
 import re
 import os
+from dotenv import load_dotenv
+from starlette.middleware.sessions import SessionMiddleware
+from authlib.integrations.starlette_client import OAuth
+from starlette.requests import Request
+from starlette.responses import RedirectResponse
+
+load_dotenv()  # reads the .env file into memory so os.environ can see it
 
 app = FastAPI(
     title="Aphanologia Acari Portal API",
     description="Spatial API endpoints serving British Acari records & PostGIS geometries",
     version="1.1.0"
+)
+
+# Session middleware lets us securely remember who's logged in between
+# page requests, using a signed cookie in the visitor's browser. The
+# secret key (from .env) is what makes this cookie tamper-proof - a
+# visitor can't edit their own cookie to pretend to be someone else,
+# since they don't know the key used to sign it.
+app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET_KEY"])
+
+# Sets up the connection to Google's sign-in system using the
+# credentials from .env. server_metadata_url points Authlib at
+# Google's own published configuration, so it automatically knows
+# the correct URLs/settings to use - we don't have to hardcode them.
+oauth = OAuth()
+oauth.register(
+    name='google',
+    client_id=os.environ["GOOGLE_CLIENT_ID"],
+    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'}
 )
 
 @app.get("/", response_class=FileResponse)
@@ -23,6 +50,99 @@ def serve_map():
 @app.get("/taxonomy", response_class=FileResponse)
 def serve_taxonomy():
     return FileResponse("taxonomy.html")
+
+#==========================================================
+# LOGIN ENDPOINTS
+#==========================================================
+
+@app.get("/auth/login")
+async def login(request: Request):
+    """
+    Step 1: sends the visitor to Google's own sign-in page. redirect_uri
+    tells Google where to send them back to afterward - this MUST
+    exactly match what you registered in Google Cloud Console.
+    """
+    redirect_uri = "http://127.0.0.1:8000/auth/callback"
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request):
+    """
+    Step 2: Google sends the visitor back here after they approve
+    sign-in. Verifies the token is genuine, extracts their email/name,
+    then looks them up (or creates them) in our own users table -
+    this is the moment authentication (Google) hands off to our own
+    authorization system (the role stored in our database).
+    """
+    token = await oauth.google.authorize_access_token(request)
+    userinfo = token.get('userinfo')
+
+    if not userinfo:
+        raise HTTPException(status_code=400, detail="Could not verify Google sign-in")
+
+    google_sub = userinfo["sub"]
+    email = userinfo["email"]
+    display_name = userinfo.get("name", email)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT user_id, role FROM users WHERE google_sub = %s;', (google_sub,))
+        existing = cursor.fetchone()
+
+        if existing:
+            cursor.execute(
+                'UPDATE users SET last_login_at = CURRENT_TIMESTAMP, email = %s, display_name = %s WHERE google_sub = %s;',
+                (email, display_name, google_sub)
+            )
+            user_id, role = existing["user_id"], existing["role"]
+        else:
+            cursor.execute(
+                '''INSERT INTO users (google_sub, email, display_name, last_login_at)
+                   VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                   RETURNING user_id, role;''',
+                (google_sub, email, display_name)
+            )
+            new_row = cursor.fetchone()
+            user_id, role = new_row["user_id"], new_row["role"]
+
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    # Store the essentials in the visitor's session (the secure cookie).
+    # Every future request from this browser can now check
+    # request.session.get("user") to know who's logged in, without
+    # querying Google again.
+    request.session["user"] = {
+        "user_id": user_id,
+        "email": email,
+        "display_name": display_name,
+        "role": role,
+    }
+
+    return RedirectResponse(url="/")
+
+
+@app.get("/auth/logout")
+async def logout(request: Request):
+    """Clears the session, signing the visitor out."""
+    request.session.pop("user", None)
+    return RedirectResponse(url="/")
+
+
+@app.get("/api/v1/auth/me")
+async def get_current_user(request: Request):
+    """
+    Lets the front end (any page) check who's currently logged in,
+    so it can show 'Sign in' vs. the person's name/role appropriately.
+    """
+    user = request.session.get("user")
+    if not user:
+        return {"logged_in": False}
+    return {"logged_in": True, **user}
 
 
 # ==========================================================
