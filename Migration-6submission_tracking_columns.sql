@@ -1,0 +1,12 @@
+ALTER TABLE samples
+    ADD COLUMN IF NOT EXISTS submitted_by_user_id INT REFERENCES users(user_id),
+    ADD COLUMN IF NOT EXISTS entered_by TEXT,
+    ADD COLUMN IF NOT EXISTS entered_at TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE observations
+    ADD COLUMN IF NOT EXISTS submitted_by_user_id INT REFERENCES users(user_id),
+    ADD COLUMN IF NOT EXISTS entered_by TEXT,
+    ADD COLUMN IF NOT EXISTS entered_at TIMESTAMP WITH TIME ZONE;
+
+CREATE SEQUENCE IF NOT EXISTS web_eventid_seq START 1;
+CREATE SEQUENCE IF NOT EXISTS web_observationid_seq START 1;
