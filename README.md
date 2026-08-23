@@ -580,4 +580,11 @@ The following script was run to walk through an archive of images where folders 
 
  [Migration-4extend_observation_media.sql](Migration-4extend_observation_media.sql)
 
- 
+Purpose: Adds sample_id, demographic_id, and taxon_id columns to observation_media (which already had observation_id and specimen_id), plus a link_level column recording which single level a given photo is linked at. A database constraint guarantees exactly one of the five ID columns is populated, matching link_level — preventing any row from ever being ambiguous about what it depicts. This supports the full range of real cases: community photos (sample level), population photos (observation level), demographic-group photos, individual specimen photos, and photos that can only be placed at a taxonomic level with no linked record at all (e.g. an unidentified Uropodina of unknown date/location).
+
+we then ran this in sql to ensure that all specimen, observation demographic or observation level photo link allowed for an associated taxon:
+
+[View-1view_media_with_resolved_taxon.sql](View-1view_media_with_resolved_taxon.sql)
+Purpose: For every photo, works out its "effective" taxon by walking up the chain appropriate to its link_level — specimen → demographic → observation → resolved taxon (via view_effective_observations, so synonym/misapplication resolution applies here too); demographic → observation → taxon; observation → taxon directly; or the taxon_id itself if that's how it's linked. Sample-level photos resolve to no taxon at all, since a sample is a mixed community, not a single species.
+
+
