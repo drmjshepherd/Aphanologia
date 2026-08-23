@@ -603,3 +603,28 @@ Purpose: The initial import stored each photo's specimen folder name as its capt
 
 [taxonomy.html](taxonomy.html) scripts where then upldated to display the photos in the taxon details pane.
 
+a minor fix was applied to index.l so that the map appears more central.
+
+# Setting up user login
+It was decided to use google identities because it handles authentication - proving someone is who they say they are, without you ever having to store or manage passwords yourself. It does not handle authorization — knowing whether that verified person is an ordinary visitor, a super-user, or a hyper-user, and what they're allowed to do, which will be handled within the database. So the shape of the system is: Google confirms identity →  database looks up (or creates) a matching user record → that record carries the role → every protected action checks the role from the database.
+
+A google cloud project Aphanologia was set up under a gmail account.
+* Go to https://console.cloud.google.com/
+* Create a new project "Aphanologia"
+* Navigate to "APIs & Services" → "Credentials" → "Create Credentials" → "OAuth client ID"
+* Application type: "Web application"
+* set "Authorized JavaScript origins" to http://127.0.0.1:8000
+* Set "Authorized redirect URIs," to http://127.0.0.1:8000/auth/callback
+  
+This provided a get a Client ID and Client Secret
+
+the following packages were installed into the virtual environment using windows powershell:
+
+`pip install authlib itsdangerous python-dotenv`
+
+Credentials, including a session secret key, were saved to an .env file with a gitignore file protecting the .env file
+
+a users table was created in sql running 
+
+[create_users_table.sql](create_users_table.sql)
+
