@@ -628,3 +628,5 @@ a users table was created in sql running
 
 [create_users_table.sql](create_users_table.sql)
 
+A login code section was added to [main.py](main.py)
+
