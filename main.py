@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query, Path
+from fastapi import FastAPI, HTTPException, Query, Path, Depends
 from fastapi.responses import FileResponse
 from typing import Optional
 from database import get_db_connection
@@ -39,6 +39,23 @@ oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
+# checks to see if the user is allowed to submit records
+
+def require_contributor(request: Request):
+    """
+    Reusable permission check for any endpoint that lets someone
+    create or edit their own data. Raises a 401 (not logged in) or
+    403 (logged in, but role too low) error automatically if the
+    check fails - the endpoint's own code never runs in that case.
+    Returns the logged-in user's session info if the check passes.
+    """
+    user = request.session.get("user")
+    if not user:
+        raise HTTPException(status_code=401, detail="You must be signed in to do this")
+    if user["role"] not in ("contributor", "superuser", "hyperuser"):
+        raise HTTPException(status_code=403, detail="Your account needs contributor access to submit records")
+    return user
+
 @app.get("/", response_class=FileResponse)
 def serve_landing():
     return FileResponse("landing.html")
@@ -50,6 +67,7 @@ def serve_map():
 @app.get("/taxonomy", response_class=FileResponse)
 def serve_taxonomy():
     return FileResponse("taxonomy.html")
+
 
 #==========================================================
 # LOGIN ENDPOINTS
@@ -579,6 +597,245 @@ def get_observations_geojson(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+        
+#==========================================================
+# SUBMISSION ENDPOINTS
+#==========================================================
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+
+
+class SampleSubmission(BaseModel):
+    samplingLocation: Optional[str] = None
+    decimalLatitude: Optional[float] = None
+    decimalLongitude: Optional[float] = None
+    coordinateUncertaintyInMeters: Optional[int] = None
+    earliestDateCollected: Optional[str] = None  # expects YYYY-MM-DD text, matching existing convention
+    latestDateCollected: Optional[str] = None
+    habitat: Optional[str] = None
+    microhabitat: Optional[str] = None
+    samplingProtocol: Optional[str] = None
+    recordedBy: Optional[str] = None
+    eventRemarks: Optional[str] = None
+
+
+class ObservationSubmission(BaseModel):
+    eventID: str  # which sample this observation belongs to
+    taxonID: str
+    identifiedBy: Optional[str] = None
+    identificationVerificationStatus: Optional[str] = None
+    identificationRemarks: Optional[str] = None
+    basisOfRecord: Optional[str] = None
+    idTechnique: Optional[str] = None
+    idText: Optional[str] = None
+
+
+@app.post("/api/v1/submit/sample")
+def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contributor)):
+    """
+    Creates a new sample (sampling event) submitted via the website.
+    Gets a WEB-prefixed eventID so it can never collide with
+    historic imported data. Starts as belongs-to-this-user, pending
+    review - observations can then be added to it one at a time via
+    /api/v1/submit/observation, using the returned eventID.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT nextval('web_eventid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO samples (
+                "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
+                "coordinateuncertaintyinmeters", "earliestDateCollected", "latestDateCollected",
+                "habitat", "microhabitat", "samplingProtocol", "recordedBy", "eventRemarks",
+                submitted_by_user_id, entered_by, entered_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            );
+        """, (
+            new_id, payload.samplingLocation, payload.decimalLatitude, payload.decimalLongitude,
+            payload.coordinateUncertaintyInMeters, payload.earliestDateCollected, payload.latestDateCollected,
+            payload.habitat, payload.microhabitat, payload.samplingProtocol, payload.recordedBy, payload.eventRemarks,
+            user["user_id"], user["display_name"]
+        ))
+
+        # Build the spatial point immediately, if coordinates were given,
+        # so this sample behaves identically to imported data on the map
+        if payload.decimalLatitude is not None and payload.decimalLongitude is not None:
+            cursor.execute("""
+                UPDATE samples
+                SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                WHERE "eventID" = %s;
+            """, (payload.decimalLongitude, payload.decimalLatitude, new_id))
+
+        conn.commit()
+        return {"eventID": new_id, "message": "Sample created. Add observations to it using this eventID."}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create sample: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/submit/observation")
+def submit_observation(payload: ObservationSubmission, user: dict = Depends(require_contributor)):
+    """
+    Adds one observation (one species record) to an existing sample.
+    Call this repeatedly with the same eventID to record multiple
+    species found in the same sample - this is the "add another
+    observation from this sample" pattern from the project's aims.
+    Only allows adding to a sample this same user submitted, so
+    people can't add records into someone else's sample.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT submitted_by_user_id FROM samples WHERE "eventID" = %s;', (payload.eventID,))
+        sample = cursor.fetchone()
+        if not sample:
+            raise HTTPException(status_code=404, detail="No such sample (eventID)")
+        if sample["submitted_by_user_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only add observations to your own submitted samples")
+
+        cursor.execute("SELECT nextval('web_observationid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO observations (
+                "observationID", "eventID", "taxonID", "identifiedBy",
+                "identificationVerificationStatus", "identificationRemarks",
+                "basisOfRecord", "idTechnique", "idText[free_text]",
+                verification_status, submitted_by_user_id, entered_by, entered_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
+            );
+        """, (
+            new_id, payload.eventID, payload.taxonID, payload.identifiedBy,
+            payload.identificationVerificationStatus, payload.identificationRemarks,
+            payload.basisOfRecord, payload.idTechnique, payload.idText,
+            user["user_id"], user["display_name"]
+        ))
+        conn.commit()
+        return {"observationID": new_id, "eventID": payload.eventID, "status": "pending"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/submit/my-pending")
+def list_my_pending(user: dict = Depends(require_contributor)):
+    """
+    Lists everything the logged-in user has submitted that's still
+    pending review - both samples and the observations within them -
+    so they can review, edit, or withdraw before it's checked by a
+    superuser.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                o."observationID", o."eventID", o."taxonID",
+                t."scientificName", o.verification_status, o.entered_at
+            FROM observations o
+            JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            WHERE o.submitted_by_user_id = %s AND o.verification_status = 'pending'
+            ORDER BY o.entered_at DESC;
+        """, (user["user_id"],))
+        return {"pending_observations": cursor.fetchall()}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/submit/observation/{observation_id}")
+def withdraw_observation(observation_id: str, user: dict = Depends(require_contributor)):
+    """
+    Lets a contributor withdraw (delete) their own observation,
+    but ONLY while it's still pending review - once a superuser has
+    verified it, it can no longer be silently removed this way.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT submitted_by_user_id, verification_status
+            FROM observations WHERE "observationID" = %s;
+        """, (observation_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No such observation")
+        if row["submitted_by_user_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only withdraw your own submissions")
+        if row["verification_status"] != "pending":
+            raise HTTPException(status_code=400, detail="Only pending (not yet reviewed) observations can be withdrawn")
+
+        cursor.execute('DELETE FROM observations WHERE "observationID" = %s;', (observation_id,))
+        conn.commit()
+        return {"message": "Observation withdrawn"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not withdraw: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+        
+@app.delete("/api/v1/submit/sample/{event_id}")
+def withdraw_sample(event_id: str, user: dict = Depends(require_contributor)):
+    """
+    Lets a contributor withdraw their own sample, PROVIDED every
+    observation currently attached to it (if any) is still pending
+    review. If even one attached observation has already been
+    verified/queried/rejected by a superuser, the whole withdrawal
+    is refused - nothing reviewed can be silently removed this way.
+    Withdrawing the sample also withdraws any still-pending
+    observations attached to it, since an empty orphaned sample
+    left behind would serve no purpose.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT submitted_by_user_id FROM samples WHERE "eventID" = %s;', (event_id,))
+        sample = cursor.fetchone()
+        if not sample:
+            raise HTTPException(status_code=404, detail="No such sample")
+        if sample["submitted_by_user_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only withdraw your own submitted samples")
+
+        cursor.execute("""
+            SELECT COUNT(*) AS non_pending_count
+            FROM observations
+            WHERE "eventID" = %s AND verification_status != 'pending';
+        """, (event_id,))
+        if cursor.fetchone()["non_pending_count"] > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot withdraw: this sample has at least one observation that has already been reviewed"
+            )
+
+        cursor.execute('DELETE FROM observations WHERE "eventID" = %s;', (event_id,))
+        cursor.execute('DELETE FROM samples WHERE "eventID" = %s;', (event_id,))
+        conn.commit()
+        return {"message": f"Sample {event_id} and any pending observations within it were withdrawn"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not withdraw sample: {str(e)}")
     finally:
         cursor.close()
         conn.close()
