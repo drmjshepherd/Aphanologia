@@ -598,3 +598,8 @@ This script was run to backfill the already uploaded data to capture composite i
 [Migration-5backfill_captions-from_filenames.sql](Migration-5backfill_captions-from_filenames.sql)
 
 Purpose: The initial import stored each photo's specimen folder name as its caption. This updates every existing row to use the actual image filename instead (extension removed), so text-based filtering (e.g. finding "composite" images) works as intended, matching the same logic now used for new imports.
+
+[main.py](main.py) was updated to include functgions to fetch the photos
+
+[taxonomy.html](taxonomy.html) scripts where then upldated to display the photos in the taxon details pane.
+
