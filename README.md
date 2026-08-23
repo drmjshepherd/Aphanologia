@@ -648,3 +648,9 @@ The database structure was updated to allow for new data to be submitted with us
 
 [Migration-6submission_tracking_columns.sql](Migration-6submission_tracking_columns.sql)
 
+There were some issues with some of the Samples columns which were blank on upload, and recorded as double precision when they need to accept text entries.
+
+This script was run to correct the schema:
+
+[Migration-7fix_mistyped_text_columns_in_samples.sql](Migration-7fix_mistyped_text_columns_in_samples.sql)
+Purpose: samplingProtocol and samplesizeUnit were created as double precision rather than text, almost certainly because every row's value was blank at the time of the original bulk import, causing Pandas to infer a numeric type. Both columns are meant to hold free text (e.g. "Tullgren funnel", "cm3"). This converts them to text, matching their intended purpose, and is safe since — being all-null — there's no real numeric data to lose in the conversion.
