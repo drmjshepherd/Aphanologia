@@ -373,3 +373,10 @@ and adding 2 new functions:
     chain of hierarchy taxonIDs from the top of the tree (Animalia)
     down to the hierarchical node that the front-end tree needs to
     expand to reveal it. Wraps get_ancestor_chain() (Query-4).
+
+Where's the script for this?
+
+## Linking images from a taxonomically-arranged image archive
+The following script was run to walk through an archive of images where folders have been arranged in taxonomic rank, and individual specimen photos stored within appropriate folders for their level of identification.
+
+ [catalogue_image_archive.py](catalogue_image_archive.py) 
