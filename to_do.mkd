@@ -13,3 +13,4 @@
 * "View full gallery" - photos clicked on links to observations view.
 * Correct the misapplied typos (e.g. "senus" in Veigaia kochi)
 * ensure that the data entry includes SHADe (currently missing from existing data entry form
+* link single sample/observation entry form to landing page and check it has a "back" navigation.
