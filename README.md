@@ -665,3 +665,17 @@ However, some such references were marked with no modifiers (just an author name
 This script was run to ensure that all the misapplications were treated at the same rank as synonyms, rather than as valid children int he taxonomy displays.
 
 [Migration-9backfill_acceptednameusage.sql](Migration-9backfill_acceptednameusage.sql)
+
+The form was set up, to allow entry of a sample details and then allow one or more observations to the sample.  This didn't initially include demongraphic and specimen details, so these were added later (not yet!)
+
+##Database Schema viewer
+A new page
+
+[schema.html](schema.html)
+
+was created to allow superusers to view the database structure through the online GUI.
+
+this also involved an update to main.py to add require_superuser, the /schema route, and GET /api/v1/admin/schema).
+
+This shows every table, its live columns (name/type/nullable/default), and its foreign keys, plus a list of views — all read fresh from information_schema/pg_catalog on every page load, never cached or hand-maintained. There's a filter box that searches both table and column names and auto-expands matches, so you can can check field names with text queries.
+
