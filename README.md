@@ -668,6 +668,8 @@ This script was run to ensure that all the misapplications were treated at the s
 
 The form was set up, to allow entry of a sample details and then allow one or more observations to the sample.  This didn't initially include demongraphic and specimen details, so these were added later (not yet!)
 
+
+
 ##Database Schema viewer
 A new page
 
@@ -678,4 +680,16 @@ was created to allow superusers to view the database structure through the onlin
 this also involved an update to main.py to add require_superuser, the /schema route, and GET /api/v1/admin/schema).
 
 This shows every table, its live columns (name/type/nullable/default), and its foreign keys, plus a list of views — all read fresh from information_schema/pg_catalog on every page load, never cached or hand-maintained. There's a filter box that searches both table and column names and auto-expands matches, so you can can check field names with text queries.
+
+A review of the schema using the code/page above revealed that many database columns had type mismatches as a result of assmptions that things were text or empty columns were double precision, on import.
+
+Unnamed:3/Unnamed:4 in taxon_literature_junction included 2 working never meant to be part of the upload which were dropped entirely.
+A human-coded habitat dropdown code was added to the entry form.
+
+This was acheived using 2 "Migration" scripts, and main.py and submit.html were updated with changes.
+[Migration-10add_demographic_and_specimen_sequences.sql](Migration-10add_demographic_and_specimen_sequences.sql)
+This allows integration of the observation_demographics table and specimen table, allowing them to be completed through submit.html, including on already submitted samples and observations. Adding a new observation and retroactively from the "Your submissions" list (which, as confirmed earlier, works on already-verified samples too — no restriction). Sex and lifestage are locked to controlled vocabularies; specimen type offers the standard nomenclatural type categories plus "Not a type specimen" as the default-friendly option.
+
+[Migration11type_fixes_dead_columns_and_parent_integrity.sql](Migration11type_fixes_dead_columns_and_parent_integrity.sql)
+This removed dead columns and combined parentnameusageid with parentNameUsageID using a diagnose-then-enforce process, checking for NULL parent taxa (shoudl only be Animalia at the top of the tree) with the failsafe being that ALTER TABLE ADD CONSTRAINT will simply fail with a clear error rather than corrupt anything, as an intentional outcome.
 
