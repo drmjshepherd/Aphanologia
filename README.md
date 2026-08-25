@@ -693,3 +693,13 @@ This allows integration of the observation_demographics table and specimen table
 [Migration11type_fixes_dead_columns_and_parent_integrity.sql](Migration11type_fixes_dead_columns_and_parent_integrity.sql)
 This removed dead columns and combined parentnameusageid with parentNameUsageID using a diagnose-then-enforce process, checking for NULL parent taxa (shoudl only be Animalia at the top of the tree) with the failsafe being that ALTER TABLE ADD CONSTRAINT will simply fail with a clear error rather than corrupt anything, as an intentional outcome.
 
+Some fixes were applied to the landing page, to link it to the "submit.html" page.  Also a literature display was added to the "taxonomy.html" page, along with necessary style elements, a javascript to retrieve the literature data and an endpoint in main.py
+
+## Review and approval/rejection/reassingment of submitted records
+A review page and table was set up to allow review of submitted records by a superuser, which allowed records to be reviewed accepted, rejected or reassigned.  The table records every action, so that there is a clear log of decisions, rather than overwriting decisions. This may allow rollback or an audit trail for decisions.  The new table was created using:
+
+[Migration-12verification_actions_table.sql](Migration-12verification_actions_table.sql) 
+
+While "observations" already has verification_status/verified_by/verified_date/verification_notes, but these are a single snapshot so each new review action overwrites the last, so there's no record of HOW a record reached its current state, who was involved along the way, or why an earlier decision was changed. Given the emphasis on being able to show your reasoning for taxonomic and verification decisions transparently (to the recording community, to Chris Raper/NBN, to anyone questioning a call later), this needs to be a proper append-only log: one row per review action, never overwritten or deleted.
+
+This also directly supports the planned contributor notification bell (a contributor should be told when one of their records is reviewed) via the viewed_by_contributor flag - not built yet, but the data this needs already exists here rather than being bolted on awkwardly later.
