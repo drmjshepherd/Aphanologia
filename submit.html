@@ -194,7 +194,7 @@
                     <div class="field-row">
                         <div class="field">
                             <label for="f-habitat">Habitat <span class="hint">(UK Broad Habitat type)</span></label>
-                            <input type="text" id="f-habitat" placeholder="e.g. Broadleaved woodland">
+                            <select id="f-habitat"></select>
                         </div>
                         <div class="field">
                             <label for="f-protocol">Sampling protocol</label>
@@ -477,7 +477,39 @@
             [8, "Charlock"], [8, "Bryum"], [8, "Black-grass"], [8, "Potato"], [8, "Black bindweed"],
             [8, "Common poppy"], [8, "Common orache"], [8, "Fool's parsley"], [8, "Sea beet"],
         ];
-
+		
+		const HABITATS = [
+			"Broadleaved and Mixed Yew Woodland",
+            "Coniferous Woodland",
+            "Boundaries and Linear Features",
+            "Arable and Horticulture",
+            "Improved Grassland",
+            "Neutral Grassland",
+            "Calcareous Grassland",
+            "Acid Grassland",
+            "Bracken",
+            "Dwarf Shrub heath",
+            "Fen, Marsh, Swamp",
+            "Bog",
+            "Rivers and Streams",
+            "Standing open waters, canals and Ponds)",
+			"Montane",
+			"Inland Rock",
+			"Urban",
+			"Supra-littoral rock",
+			"Supra-littoral sediment",
+			"Littoral sediment",
+			"Sea",
+			"Mosaic" 
+		];
+		
+		function populateSelectWithOptions(selectEl, options, title) {
+			selectEl.innerHTML = '<option value="">-- '+title+' --</option>';
+			for (const option of options) {
+				selectEl.innerHTML += `<option value="${option}">${option}</option>`;
+			}
+		}
+     
         function populateSubstrateMajor(selectEl) {
             selectEl.innerHTML = '<option value="">-- Major substrate --</option>';
             for (const [code, group] of Object.entries(SHADE_SUBSTRATES)) {
@@ -520,6 +552,7 @@
             const disturbance = document.getElementById('shade-disturbance');
             const acidityLookup = document.getElementById('shade-acidity-lookup');
             const acidityResults = document.getElementById('shade-acidity-results');
+			const habitat = document.getElementById('f-habitat');
 
             populateSubstrateMajor(sub1Major);
             populateSubstrateMajor(sub2Major);
@@ -527,6 +560,9 @@
             populateSubstrateMinor(sub2Major, sub2Minor);
             populateNumberSelect(humidity, SHADE_HUMIDITY);
             populateNumberSelect(disturbance, SHADE_DISTURBANCE);
+			// Human code time!!
+			populateSelectWithOptions(habitat, HABITATS, "Habitat")
+			
 
             acidity.innerHTML = '<option value="">-- Select --</option><option value="0">0 - Unknown</option>';
             for (let ph = 3; ph <= 9; ph++) {
