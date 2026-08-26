@@ -707,20 +707,16 @@ While "observations" already has verification_status/verified_by/verified_date/v
 This also directly supports the planned contributor notification bell (a contributor should be told when one of their records is reviewed) via the viewed_by_contributor flag - not built yet, but the data this needs already exists here rather than being bolted on awkwardly later.
 
 ## Additions and tweaks
+Several small fixes were applied:
+* Source-of-record picker, above sampling location on the sample form to choose between six categories, picking "Published literature" or "Formal project or survey" reveals a fuzzy-search box against the real tables, with an "add new" fallback if it's not catalogued yet. Everything else gets a plain detail field. The old dataSource[free text] column still gets a sensible human-readable summary written to it automatically, so it stays useful to skim even though the real link now lives in sample_literature_junction / the new sample_project_junction.
+* Fuzzy search everywhere it matters — taxonomy browser, submission form's species picker, review screen's reassign picker, and now the map page too. All backed by PostgreSQL's pg_trgm, not a client-side library, so it scales properly as your taxonomy grows.
+* Searching for "Nothrus" in the taxon serach box resulted in many "Ameronothrus" populating the list, to the exclusion of the desired species.  This is now fixed — ranking now boosts exact-prefix matches to the top before falling back to similarity score, so the genus itself surfaces first rather than being buried under 15 unrelated genus names that happen to contain the string.
+* Map page got the autocomplete it never had — previously it only did free-text substring matching against observation records directly. Now typing brings up the same taxon dropdown as everywhere else; picking a result sets the map to that specific taxon (via taxon_id, descendant-aware) and refreshes immediately. If you type without picking anything, it still falls back to the old free-text behaviour, so nothing's lost.
+* Dropdown height bumped from ~220–320px to ~400–440px across all four pages, so more results are visible before scrolling.  Note that on map page this doesn't allow for using keyboard arrows to select from the dropdown yet.
 
-What's here:
+The sample_project_junction requires a project category (survey/monitoring or records-centre bulk download) at creation time, to specifically reflect records-centre downloads distinguishable as a subtype rather than lost as a generic "project." (e.g. ERCCIS as records-centre, England Ecosystem Survey as survey/monitoring). This will be reviewed later.
 
-Source-of-record picker, above sampling location on the sample form. Six categories; picking "Published literature" or "Formal project or survey" reveals a fuzzy-search box against the real tables, with an "add new" fallback if it's not catalogued yet. Everything else gets a plain detail field. The old dataSource[free text] column still gets a sensible human-readable summary written to it automatically, so it stays useful to skim even though the real link now lives in sample_literature_junction / the new sample_project_junction.
-Fuzzy search everywhere it matters — taxonomy browser, submission form's species picker, review screen's reassign picker, and now the map page too. All backed by PostgreSQL's pg_trgm, not a client-side library, so it scales properly as your taxonomy grows.
-Nothrus vs. Ameronothrus is fixed — ranking now boosts exact-prefix matches to the top before falling back to similarity score, so the genus itself surfaces first rather than being buried under 15 unrelated genus names that happen to contain the string.
-Map page got the autocomplete it never had — previously it only did free-text substring matching against observation records directly. Now typing brings up the same taxon dropdown as everywhere else; picking a result sets the map to that specific taxon (via taxon_id, descendant-aware) and refreshes immediately. If you type without picking anything, it still falls back to the old free-text behaviour, so nothing's lost.
-Dropdown height bumped from ~220–320px to ~400–440px across all four pages, so more results are visible before scrolling.
-
-One judgment call worth flagging: I made sample_project_junction require a project category (survey/monitoring vs. records-centre bulk download) at creation time, since you specifically wanted records-centre downloads distinguishable as a subtype rather than lost as a generic "project." Worth checking that split feels right once you've added a couple of real entries — ERCCIS as records-centre, England Ecosystem Survey as survey/monitoring, that kind of thing.
-
-Good one to test end-to-end: create a sample, pick "Published literature," search for something that doesn't exist yet, add it fresh, confirm it links — then create another sample citing ERCCIS as a project the same way.
-
-This was achived using updates to main.py, index.html, submit.html, taxonomy.html, and review.html
+These were achieved using updates to main.py, index.html, submit.html, taxonomy.html, and review.html, which were updated after creating the new junction table with this script.
 
 [Migration-13fuzzy_search_and_source-of-record_structure.sql](Migration-13fuzzy_search_and_source-of-record_structure.sql)
 
