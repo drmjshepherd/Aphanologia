@@ -96,6 +96,10 @@ def serve_schema_viewer():
 def serve_review():
     return FileResponse("review.html")
 
+@app.get("/admin/taxonomy", response_class=FileResponse)
+def serve_taxonomy_editor():
+    return FileResponse("taxonomy_editor.html")
+
 
 #==========================================================
 # LOGIN ENDPOINTS
@@ -805,6 +809,38 @@ class VerificationActionSubmission(BaseModel):
     action_type: str  # 'accepted' | 'rejected' | 'reassigned' | 'queried'
     notes: Optional[str] = None
     reassigned_taxon_id: Optional[str] = None  # required only when action_type == 'reassigned'
+
+
+class TaxonomyEditSubmission(BaseModel):
+    """
+    Full-record edit for one taxon. Deliberately a full-replace shape
+    (like the sample/observation submission forms) rather than a
+    partial patch - the editor page always sends every editable
+    field, whether or not the person actually changed it, which
+    avoids any ambiguity between "field not sent" and "field
+    deliberately cleared to blank".
+    """
+    scientificName: Optional[str] = None
+    scientificnameAuthorship: Optional[str] = None
+    taxonrank: Optional[str] = None
+    taxonomicStatus: Optional[str] = None
+    nomenclaturalStatus: Optional[str] = None
+    taxonRemarks: Optional[str] = None
+    parentNameUsageID: Optional[str] = None   # hierarchical parent - blank if this is a top-level taxon or a synonym
+    acceptedNameUsageID: Optional[str] = None  # set this to mark the taxon as a synonym of another taxon
+    notes: Optional[str] = None  # reason for the edit - stored in admin_activity_log, not on the taxon itself
+
+
+class TaxonomyCreateSubmission(BaseModel):
+    scientificName: str
+    scientificnameAuthorship: Optional[str] = None
+    taxonrank: str
+    taxonomicStatus: Optional[str] = "accepted"
+    nomenclaturalStatus: Optional[str] = None
+    taxonRemarks: Optional[str] = None
+    parentNameUsageID: Optional[str] = None    # set this for a new taxon in the hierarchy
+    acceptedNameUsageID: Optional[str] = None  # OR set this for a new synonym of an existing taxon (not both)
+    notes: Optional[str] = None
 
 
 @app.post("/api/v1/submit/sample")
@@ -1602,6 +1638,250 @@ def submit_verification_action(
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Could not record verification action: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ==========================================================
+# TAXONOMY EDITOR (superuser only)
+# ==========================================================
+# Lets a superuser rename taxa, change rank/status, reparent them
+# within the hierarchy, mark them as synonyms of another taxon, or
+# create brand new taxa - all through the GUI at /admin/taxonomy,
+# rather than needing a hand-written SQL migration for routine
+# taxonomic maintenance. Every change is written to
+# admin_activity_log as a permanent, append-only record of exactly
+# what changed, who changed it, and why (their optional notes) - the
+# same audit-trail pattern already used for observation verification.
+#
+# Reads for the editor reuse the existing public endpoints
+# (/api/v1/taxonomy/detail/{id}, /api/v1/taxonomy/search,
+# /api/v1/taxonomy/children/{id}) - only the writes below are new.
+
+def _get_ancestor_id_set(cursor, taxon_id: str) -> set:
+    """Small helper: the set of taxonIDs in a taxon's ancestor chain,
+    used to block reparenting moves that would create a cycle (i.e.
+    setting a taxon's parent to one of its own descendants)."""
+    cursor.execute("SELECT * FROM get_ancestor_chain(%s);", (taxon_id,))
+    return {r["taxon_id"] for r in cursor.fetchall()}
+
+
+@app.put("/api/v1/admin/taxonomy/{taxon_id}")
+def edit_taxonomy(
+    taxon_id: str,
+    payload: TaxonomyEditSubmission,
+    user: dict = Depends(require_superuser)
+):
+    """
+    Saves edits to an existing taxon: name/authorship/rank/status
+    changes, reparenting within the hierarchy, or marking it as a
+    synonym of another taxon. Validates that reparenting can't create
+    a circular chain of ancestry, and that synonymy always points
+    directly at a genuinely accepted taxon (never at another synonym,
+    and never at a taxon that still has its own children hanging off
+    it in the hierarchy). Logs a field-by-field diff of whatever
+    actually changed to admin_activity_log.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM taxonomy WHERE "taxonID" = %s;', (taxon_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail=f"No taxon found with taxonID {taxon_id}")
+
+        new_values = {
+            "scientificName": (payload.scientificName or "").strip() or None,
+            "scientificnameAuthorship": (payload.scientificnameAuthorship or "").strip() or None,
+            "taxonrank": (payload.taxonrank or "").strip() or None,
+            "taxonomicStatus": (payload.taxonomicStatus or "").strip() or None,
+            "nomenclaturalStatus": (payload.nomenclaturalStatus or "").strip() or None,
+            "taxonRemarks": (payload.taxonRemarks or "").strip() or None,
+            "parentNameUsageID": (payload.parentNameUsageID or "").strip() or None,
+            "acceptedNameUsageID": (payload.acceptedNameUsageID or "").strip() or None,
+        }
+
+        if not new_values["scientificName"]:
+            raise HTTPException(status_code=400, detail="scientificName is required")
+        if not new_values["taxonrank"]:
+            raise HTTPException(status_code=400, detail="taxonrank is required")
+
+        # --- Reparenting validation ---
+        new_parent = new_values["parentNameUsageID"]
+        if new_parent and new_parent != current["parentNameUsageID"]:
+            if new_parent == taxon_id:
+                raise HTTPException(status_code=400, detail="A taxon cannot be its own parent")
+            cursor.execute('SELECT "taxonID", "acceptedNameUsageID" FROM taxonomy WHERE "taxonID" = %s;', (new_parent,))
+            parent_row = cursor.fetchone()
+            if not parent_row:
+                raise HTTPException(status_code=400, detail="parentNameUsageID does not match any taxon")
+            if parent_row["acceptedNameUsageID"] is not None:
+                raise HTTPException(status_code=400, detail="Cannot set the parent to a taxon that is itself a synonym - point to its accepted name instead")
+            if taxon_id in _get_ancestor_id_set(cursor, new_parent):
+                raise HTTPException(status_code=400, detail="That would create a circular parentage - the new parent is a descendant of this taxon")
+
+        # --- Synonymy validation ---
+        new_accepted = new_values["acceptedNameUsageID"]
+        if new_accepted and new_accepted != current["acceptedNameUsageID"]:
+            if new_accepted == taxon_id:
+                raise HTTPException(status_code=400, detail="A taxon cannot be a synonym of itself")
+            cursor.execute('SELECT "taxonID", "acceptedNameUsageID" FROM taxonomy WHERE "taxonID" = %s;', (new_accepted,))
+            accepted_row = cursor.fetchone()
+            if not accepted_row:
+                raise HTTPException(status_code=400, detail="acceptedNameUsageID does not match any taxon")
+            if accepted_row["acceptedNameUsageID"] is not None:
+                raise HTTPException(status_code=400, detail="Cannot mark this as a synonym of another synonym - point to the accepted name directly")
+            cursor.execute('SELECT 1 FROM taxonomy WHERE "parentNameUsageID" = %s LIMIT 1;', (taxon_id,))
+            if cursor.fetchone():
+                raise HTTPException(status_code=400, detail="This taxon still has children in the hierarchy - reparent them elsewhere before marking it as a synonym")
+
+        # --- Diff against current values, for the audit log ---
+        field_changes = {}
+        for field, new_val in new_values.items():
+            if (current[field] or None) != (new_val or None):
+                field_changes[field] = {"old": current[field], "new": new_val}
+
+        if not field_changes:
+            return {"taxonID": taxon_id, "message": "No changes to save.", "changed_fields": []}
+
+        cursor.execute("""
+            UPDATE taxonomy SET
+                "scientificName" = %s, "scientificnameAuthorship" = %s, "taxonrank" = %s,
+                "taxonomicStatus" = %s, "nomenclaturalStatus" = %s, "taxonRemarks" = %s,
+                "parentNameUsageID" = %s, "acceptedNameUsageID" = %s
+            WHERE "taxonID" = %s;
+        """, (
+            new_values["scientificName"], new_values["scientificnameAuthorship"], new_values["taxonrank"],
+            new_values["taxonomicStatus"], new_values["nomenclaturalStatus"], new_values["taxonRemarks"],
+            new_values["parentNameUsageID"], new_values["acceptedNameUsageID"], taxon_id
+        ))
+
+        cursor.execute("""
+            INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+        """, (user["user_id"], "taxonomy_edit", "taxonomy", taxon_id, json.dumps(field_changes), payload.notes))
+
+        conn.commit()
+        return {"taxonID": taxon_id, "message": "Saved.", "changed_fields": list(field_changes.keys())}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save taxon: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/taxonomy")
+def create_taxonomy(payload: TaxonomyCreateSubmission, user: dict = Depends(require_superuser)):
+    """
+    Creates a brand new taxon - either a new accepted taxon somewhere
+    in the hierarchy (set parentNameUsageID), or a new synonym of an
+    existing accepted taxon (set acceptedNameUsageID instead of a
+    parent). Gets a WEB-prefixed taxonID, the same convention used
+    everywhere else new records are created via the site, so it can
+    never collide with a legacy imported taxonID (e.g. 244).
+    """
+    if not payload.parentNameUsageID and not payload.acceptedNameUsageID:
+        raise HTTPException(status_code=400, detail="Provide either parentNameUsageID (a new taxon in the hierarchy) or acceptedNameUsageID (a new synonym of an existing taxon)")
+    if payload.parentNameUsageID and payload.acceptedNameUsageID:
+        raise HTTPException(status_code=400, detail="Provide parentNameUsageID OR acceptedNameUsageID, not both")
+    if not payload.scientificName.strip():
+        raise HTTPException(status_code=400, detail="scientificName is required")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if payload.parentNameUsageID:
+            cursor.execute('SELECT "taxonID", "acceptedNameUsageID" FROM taxonomy WHERE "taxonID" = %s;', (payload.parentNameUsageID,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail="parentNameUsageID does not match any taxon")
+            if row["acceptedNameUsageID"] is not None:
+                raise HTTPException(status_code=400, detail="Cannot set the parent to a taxon that is itself a synonym - point to its accepted name instead")
+        if payload.acceptedNameUsageID:
+            cursor.execute('SELECT "taxonID", "acceptedNameUsageID" FROM taxonomy WHERE "taxonID" = %s;', (payload.acceptedNameUsageID,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail="acceptedNameUsageID does not match any taxon")
+            if row["acceptedNameUsageID"] is not None:
+                raise HTTPException(status_code=400, detail="Cannot mark this as a synonym of another synonym - point to the accepted name directly")
+
+        cursor.execute("SELECT nextval('web_taxonid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO taxonomy (
+                "taxonID", "scientificName", "scientificnameAuthorship", "taxonrank",
+                "taxonomicStatus", "nomenclaturalStatus", "taxonRemarks",
+                "parentNameUsageID", "acceptedNameUsageID"
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
+        """, (
+            new_id, payload.scientificName.strip(), payload.scientificnameAuthorship, payload.taxonrank,
+            payload.taxonomicStatus, payload.nomenclaturalStatus, payload.taxonRemarks,
+            payload.parentNameUsageID, payload.acceptedNameUsageID
+        ))
+
+        log_snapshot = payload.dict(exclude={"notes"})
+        cursor.execute("""
+            INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+        """, (user["user_id"], "taxonomy_create", "taxonomy", new_id, json.dumps(log_snapshot), payload.notes))
+
+        conn.commit()
+        return {"taxonID": new_id, "message": "Taxon created."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create taxon: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/admin/activity-log")
+def get_admin_activity_log(
+    table_name: Optional[str] = Query(None, description="Filter to one table, e.g. 'taxonomy'"),
+    record_id: Optional[str] = Query(None, description="Filter to one record's full edit history"),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict = Depends(require_superuser)
+):
+    """
+    Returns admin activity log entries, most recent first. Used both
+    as a general recent-changes feed, and (filtered by record_id) as
+    the edit-history panel on a single taxon's editor page.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        where_clauses = []
+        params = []
+        if table_name:
+            where_clauses.append("l.table_name = %s")
+            params.append(table_name)
+        if record_id:
+            where_clauses.append("l.record_id = %s")
+            params.append(record_id)
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        cursor.execute(f"""
+            SELECT l.log_id, l.performed_by_user_id, u.display_name AS performed_by_name,
+                   l.action_type, l.table_name, l.record_id, l.field_changes, l.notes, l.performed_at
+            FROM admin_activity_log l
+            LEFT JOIN users u ON l.performed_by_user_id = u.user_id
+            {where_sql}
+            ORDER BY l.performed_at DESC
+            LIMIT %s;
+        """, params + [limit])
+        rows = cursor.fetchall()
+        return {"count": len(rows), "entries": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
     finally:
         cursor.close()
         conn.close()
