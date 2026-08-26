@@ -104,7 +104,7 @@
         .taxon-search-wrapper { position: relative; }
         #obs-taxon-dropdown {
             position: absolute; top: 100%; left: 0; right: 0; background: white;
-            border: 1px solid #ced4da; border-top: none; max-height: 260px; overflow-y: auto;
+            border: 1px solid #ced4da; border-top: none; max-height: 420px; overflow-y: auto;
             z-index: 50; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
         }
         #obs-taxon-dropdown.visible { display: block; }
@@ -158,6 +158,23 @@
             background: none; border: none; color: #2d6a4f; font-size: 0.78rem;
             text-decoration: underline; cursor: pointer; padding: 0; font-weight: 600;
         }
+
+        /* --- Source of record picker --- */
+        #source-picker { border: 1px dashed #b7d9c4; border-radius: 6px; padding: 14px 16px; background: #f4faf6; margin-bottom: 4px; }
+        .source-search-wrapper { position: relative; }
+        .source-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 300px; overflow-y: auto;
+            z-index: 60; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .source-dropdown.visible { display: block; }
+        .source-result-row { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.85rem; }
+        .source-result-row:hover { background: #e9ecef; }
+        .source-selected-note { margin-top: 6px; font-size: 0.83rem; color: #2d6a4f; font-weight: 600; }
+        .source-add-form {
+            border: 1px dashed #ced4da; border-radius: 6px; padding: 12px; margin-top: 10px; display: none;
+        }
+        .source-add-form.visible { display: block; }
     </style>
 </head>
 <body>
@@ -186,6 +203,84 @@
                 </p>
 
                 <form id="sample-form">
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="f-source-category">Source of record</label>
+                            <select id="f-source-category"></select>
+                        </div>
+                    </div>
+
+                    <div id="source-picker" style="display:none;">
+                        <!-- Published literature picker -->
+                        <div id="source-literature-block" style="display:none;">
+                            <div class="field-row">
+                                <div class="field full source-search-wrapper">
+                                    <label>Find the reference</label>
+                                    <input type="text" id="source-lit-search" placeholder="Search by author, title, or year..." autocomplete="off">
+                                    <div id="source-lit-dropdown" class="source-dropdown"></div>
+                                    <div id="source-lit-selected" class="source-selected-note"></div>
+                                </div>
+                            </div>
+                            <button type="button" class="toggle-add-link" onclick="document.getElementById('source-lit-add-form').classList.toggle('visible')">+ Can't find it? Add a new reference</button>
+                            <div id="source-lit-add-form" class="source-add-form">
+                                <div class="field-row">
+                                    <div class="field"><label>Author(s)</label><input type="text" id="lit-author"></div>
+                                    <div class="field"><label>Year</label><input type="text" id="lit-year"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field full"><label>Article / chapter title</label><input type="text" id="lit-articletitle"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field"><label>Publication title</label><input type="text" id="lit-pubtitle"></div>
+                                    <div class="field"><label>Volume</label><input type="text" id="lit-volume"></div>
+                                    <div class="field"><label>Pages</label><input type="text" id="lit-pages"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field full"><label>URL <span class="hint">(if available online)</span></label><input type="text" id="lit-url"></div>
+                                </div>
+                                <button type="button" class="small" onclick="addNewLiteratureReference()">Add this reference</button>
+                                <div id="lit-add-status"></div>
+                            </div>
+                        </div>
+
+                        <!-- Formal project / survey picker -->
+                        <div id="source-project-block" style="display:none;">
+                            <div class="field-row">
+                                <div class="field full source-search-wrapper">
+                                    <label>Find the project</label>
+                                    <input type="text" id="source-proj-search" placeholder="Search project name..." autocomplete="off">
+                                    <div id="source-proj-dropdown" class="source-dropdown"></div>
+                                    <div id="source-proj-selected" class="source-selected-note"></div>
+                                </div>
+                            </div>
+                            <button type="button" class="toggle-add-link" onclick="document.getElementById('source-proj-add-form').classList.toggle('visible')">+ Can't find it? Add a new project</button>
+                            <div id="source-proj-add-form" class="source-add-form">
+                                <div class="field-row">
+                                    <div class="field full"><label>Project name</label><input type="text" id="proj-name"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field"><label>Category</label><select id="proj-category"></select></div>
+                                    <div class="field"><label>Website <span class="hint">(if it has one)</span></label><input type="text" id="proj-website"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field full"><label>Description</label><textarea id="proj-description"></textarea></div>
+                                </div>
+                                <button type="button" class="small" onclick="addNewProject()">Add this project</button>
+                                <div id="proj-add-status"></div>
+                            </div>
+                        </div>
+
+                        <!-- Other categories: just a free-text detail field -->
+                        <div id="source-other-block" style="display:none;">
+                            <div class="field-row">
+                                <div class="field full">
+                                    <label id="source-other-label">Detail</label>
+                                    <input type="text" id="source-other-detail">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="field-row">
                         <div class="field full">
                             <label for="f-location">Sampling location</label>
@@ -678,6 +773,183 @@
         populateSelectWithOptions(document.getElementById('f-habitat'), HABITATS, "Habitat");
 
         // ==================================================
+        // SOURCE OF RECORD PICKER
+        // ==================================================
+        const SOURCE_CATEGORIES = [
+            "Personal collection",
+            "Formal project or survey",
+            "Published literature",
+            "Museum or institutional collection",
+            "Recording event",
+            "Other",
+        ];
+        const PROJECT_CATEGORIES = ["Survey or monitoring programme", "Biological records centre bulk download"];
+
+        populateSelectWithOptions(document.getElementById('f-source-category'), SOURCE_CATEGORIES, "Select a source type");
+        populateSelectWithOptions(document.getElementById('proj-category'), PROJECT_CATEGORIES, "Select a category");
+
+        let selectedSourceLiteratureID = null;
+        let selectedSourceProjectID = null;
+
+        document.getElementById('f-source-category').addEventListener('change', (e) => {
+            const cat = e.target.value;
+            document.getElementById('source-picker').style.display = cat ? 'block' : 'none';
+            document.getElementById('source-literature-block').style.display = cat === 'Published literature' ? 'block' : 'none';
+            document.getElementById('source-project-block').style.display = cat === 'Formal project or survey' ? 'block' : 'none';
+            const otherBlock = document.getElementById('source-other-block');
+            const showOther = cat && cat !== 'Published literature' && cat !== 'Formal project or survey';
+            otherBlock.style.display = showOther ? 'block' : 'none';
+            if (showOther) {
+                document.getElementById('source-other-label').textContent =
+                    cat === 'Museum or institutional collection' ? 'Which museum/institution?' :
+                    cat === 'Recording event' ? 'Which event?' :
+                    cat === 'Other' ? 'Please specify' :
+                    'Detail (optional)';
+            }
+        });
+
+        // --- Literature fuzzy search ---
+        const litSearchBox = document.getElementById('source-lit-search');
+        const litDropdown = document.getElementById('source-lit-dropdown');
+        let litSearchTimer = null;
+        litSearchBox.addEventListener('input', () => {
+            clearTimeout(litSearchTimer);
+            selectedSourceLiteratureID = null;
+            document.getElementById('source-lit-selected').textContent = '';
+            const q = litSearchBox.value.trim();
+            if (q.length < 2) { litDropdown.classList.remove('visible'); return; }
+            litSearchTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/v1/literature/search?q=${encodeURIComponent(q)}&limit=15`);
+                    const data = await res.json();
+                    litDropdown.innerHTML = data.results.length === 0
+                        ? '<div class="source-result-row">No matches - try adding it below</div>'
+                        : data.results.map(r => `<div class="source-result-row" data-lit-id="${r.lit_id}">${r.formatted_ref}</div>`).join('');
+                    litDropdown.querySelectorAll('[data-lit-id]').forEach(row => {
+                        row.addEventListener('click', () => {
+                            selectedSourceLiteratureID = row.dataset.litId;
+                            litSearchBox.value = row.textContent;
+                            document.getElementById('source-lit-selected').textContent = `Selected reference (litID ${selectedSourceLiteratureID})`;
+                            litDropdown.classList.remove('visible');
+                        });
+                    });
+                    litDropdown.classList.add('visible');
+                } catch (err) {
+                    litDropdown.innerHTML = '<div class="source-result-row">Search failed</div>';
+                }
+            }, 300);
+        });
+
+        async function addNewLiteratureReference() {
+            const statusEl = document.getElementById('lit-add-status');
+            statusEl.innerHTML = '';
+            const payload = {
+                authorName: document.getElementById('lit-author').value || null,
+                yearPublished: document.getElementById('lit-year').value || null,
+                articleTitle: document.getElementById('lit-articletitle').value || null,
+                publicationTitle: document.getElementById('lit-pubtitle').value || null,
+                publicationVolume: document.getElementById('lit-volume').value || null,
+                publicationPages: document.getElementById('lit-pages').value || null,
+                sourceURL: document.getElementById('lit-url').value || null,
+            };
+            try {
+                const res = await fetch('/api/v1/literature', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not add reference');
+                selectedSourceLiteratureID = data.litID;
+                litSearchBox.value = `${payload.authorName || ''}, ${payload.yearPublished || ''}`.trim();
+                document.getElementById('source-lit-selected').textContent = `Selected reference (litID ${selectedSourceLiteratureID})`;
+                document.getElementById('source-lit-add-form').classList.remove('visible');
+            } catch (err) {
+                statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+            }
+        }
+
+        // --- Project fuzzy search ---
+        const projSearchBox = document.getElementById('source-proj-search');
+        const projDropdown = document.getElementById('source-proj-dropdown');
+        let projSearchTimer = null;
+        projSearchBox.addEventListener('input', () => {
+            clearTimeout(projSearchTimer);
+            selectedSourceProjectID = null;
+            document.getElementById('source-proj-selected').textContent = '';
+            const q = projSearchBox.value.trim();
+            if (q.length < 2) { projDropdown.classList.remove('visible'); return; }
+            projSearchTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/v1/projects/search?q=${encodeURIComponent(q)}&limit=15`);
+                    const data = await res.json();
+                    projDropdown.innerHTML = data.results.length === 0
+                        ? '<div class="source-result-row">No matches - try adding it below</div>'
+                        : data.results.map(r => `<div class="source-result-row" data-proj-id="${r.project_id}">${r.project_name} <span style="color:#adb5bd;font-size:0.78rem;">(${r.project_category})</span></div>`).join('');
+                    projDropdown.querySelectorAll('[data-proj-id]').forEach(row => {
+                        row.addEventListener('click', () => {
+                            selectedSourceProjectID = parseInt(row.dataset.projId, 10);
+                            projSearchBox.value = row.textContent.trim();
+                            document.getElementById('source-proj-selected').textContent = `Selected project (ID ${selectedSourceProjectID})`;
+                            projDropdown.classList.remove('visible');
+                        });
+                    });
+                    projDropdown.classList.add('visible');
+                } catch (err) {
+                    projDropdown.innerHTML = '<div class="source-result-row">Search failed</div>';
+                }
+            }, 300);
+        });
+
+        async function addNewProject() {
+            const statusEl = document.getElementById('proj-add-status');
+            statusEl.innerHTML = '';
+            const payload = {
+                project_name: document.getElementById('proj-name').value,
+                project_category: document.getElementById('proj-category').value,
+                website_url: document.getElementById('proj-website').value || null,
+                description: document.getElementById('proj-description').value || null,
+            };
+            if (!payload.project_name || !payload.project_category) {
+                statusEl.innerHTML = `<div class="status-message error">Project name and category are both required.</div>`;
+                return;
+            }
+            try {
+                const res = await fetch('/api/v1/projects', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not add project');
+                selectedSourceProjectID = data.project_id;
+                projSearchBox.value = payload.project_name;
+                document.getElementById('source-proj-selected').textContent = `Selected project (ID ${selectedSourceProjectID})`;
+                document.getElementById('source-proj-add-form').classList.remove('visible');
+            } catch (err) {
+                statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+            }
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.source-search-wrapper')) {
+                litDropdown.classList.remove('visible');
+                projDropdown.classList.remove('visible');
+            }
+        });
+
+        function resetSourcePicker() {
+            document.getElementById('f-source-category').value = '';
+            document.getElementById('source-picker').style.display = 'none';
+            document.getElementById('source-literature-block').style.display = 'none';
+            document.getElementById('source-project-block').style.display = 'none';
+            document.getElementById('source-other-block').style.display = 'none';
+            litSearchBox.value = '';
+            projSearchBox.value = '';
+            document.getElementById('source-lit-selected').textContent = '';
+            document.getElementById('source-proj-selected').textContent = '';
+            document.getElementById('source-other-detail').value = '';
+            selectedSourceLiteratureID = null;
+            selectedSourceProjectID = null;
+        }
+
+        // ==================================================
         // SAMPLE FORM
         // ==================================================
         let activeEventId = null;
@@ -700,6 +972,10 @@
                 samplingProtocol: document.getElementById('f-protocol').value || null,
                 recordedBy: document.getElementById('f-recordedby').value || null,
                 eventRemarks: document.getElementById('f-remarks').value || null,
+                sourceCategory: document.getElementById('f-source-category').value || null,
+                sourceLiteratureID: selectedSourceLiteratureID,
+                sourceProjectID: selectedSourceProjectID,
+                sourceOtherDetail: document.getElementById('source-other-detail').value || null,
             };
 
             try {
@@ -730,6 +1006,7 @@
             document.getElementById('add-observation-panel').style.display = 'none';
             document.getElementById('sample-form').reset();
             initShadeBuilder();
+            resetSourcePicker();
             document.getElementById('sample-status').innerHTML = '';
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -790,7 +1067,7 @@
 
         async function runObsTaxonSearch(query) {
             try {
-                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=15`);
+                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=25`);
                 const data = await res.json();
                 obsDropdown.innerHTML = '';
                 if (data.results.length === 0) {
