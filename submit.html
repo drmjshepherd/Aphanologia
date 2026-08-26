@@ -133,6 +133,31 @@
         }
         .card-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
         .no-samples-message { color: #adb5bd; font-style: italic; font-size: 0.88rem; }
+
+        /* --- Demographics & specimens (nested under an observation) --- */
+        .demo-container { margin-top: 10px; padding-left: 14px; border-left: 2px solid #d8e9de; }
+        .demo-group-card {
+            background: #f4faf6; border: 1px solid #d8e9de; border-radius: 6px;
+            padding: 10px 12px; margin-bottom: 8px;
+        }
+        .demo-group-summary { font-size: 0.85rem; color: #1b4332; font-weight: 600; }
+        .demo-group-detail { font-size: 0.78rem; color: #6c757d; margin-top: 2px; }
+        .demo-add-form {
+            border: 1px dashed #ced4da; border-radius: 6px; padding: 12px; margin-top: 8px;
+            display: none;
+        }
+        .demo-add-form.visible { display: block; }
+        .demo-add-form .field-row { margin-bottom: 10px; }
+        .demo-add-form .field label { font-size: 0.78rem; }
+        .spec-container { margin-top: 8px; padding-left: 14px; border-left: 2px dotted #ced4da; }
+        .spec-card {
+            background: white; border: 1px solid #e9ecef; border-radius: 4px;
+            padding: 6px 10px; margin-bottom: 6px; font-size: 0.8rem; color: #495057;
+        }
+        .toggle-add-link {
+            background: none; border: none; color: #2d6a4f; font-size: 0.78rem;
+            text-decoration: underline; cursor: pointer; padding: 0; font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -353,6 +378,8 @@
                     <button type="button" class="secondary" onclick="finishSample()">Done with this sample</button>
                     <div id="observation-status"></div>
                 </form>
+
+                <div id="new-obs-demographics"></div>
             </div>
 
             <!-- ============================================= -->
@@ -477,39 +504,7 @@
             [8, "Charlock"], [8, "Bryum"], [8, "Black-grass"], [8, "Potato"], [8, "Black bindweed"],
             [8, "Common poppy"], [8, "Common orache"], [8, "Fool's parsley"], [8, "Sea beet"],
         ];
-		
-		const HABITATS = [
-			"Broadleaved and Mixed Yew Woodland",
-            "Coniferous Woodland",
-            "Boundaries and Linear Features",
-            "Arable and Horticulture",
-            "Improved Grassland",
-            "Neutral Grassland",
-            "Calcareous Grassland",
-            "Acid Grassland",
-            "Bracken",
-            "Dwarf Shrub heath",
-            "Fen, Marsh, Swamp",
-            "Bog",
-            "Rivers and Streams",
-            "Standing open waters, canals and Ponds)",
-			"Montane",
-			"Inland Rock",
-			"Urban",
-			"Supra-littoral rock",
-			"Supra-littoral sediment",
-			"Littoral sediment",
-			"Sea",
-			"Mosaic" 
-		];
-		
-		function populateSelectWithOptions(selectEl, options, title) {
-			selectEl.innerHTML = '<option value="">-- '+title+' --</option>';
-			for (const option of options) {
-				selectEl.innerHTML += `<option value="${option}">${option}</option>`;
-			}
-		}
-     
+
         function populateSubstrateMajor(selectEl) {
             selectEl.innerHTML = '<option value="">-- Major substrate --</option>';
             for (const [code, group] of Object.entries(SHADE_SUBSTRATES)) {
@@ -552,7 +547,6 @@
             const disturbance = document.getElementById('shade-disturbance');
             const acidityLookup = document.getElementById('shade-acidity-lookup');
             const acidityResults = document.getElementById('shade-acidity-results');
-			const habitat = document.getElementById('f-habitat');
 
             populateSubstrateMajor(sub1Major);
             populateSubstrateMajor(sub2Major);
@@ -560,9 +554,6 @@
             populateSubstrateMinor(sub2Major, sub2Minor);
             populateNumberSelect(humidity, SHADE_HUMIDITY);
             populateNumberSelect(disturbance, SHADE_DISTURBANCE);
-			// Human code time!!
-			populateSelectWithOptions(habitat, HABITATS, "Habitat")
-			
 
             acidity.innerHTML = '<option value="">-- Select --</option><option value="0">0 - Unknown</option>';
             for (let ph = 3; ph <= 9; ph++) {
@@ -645,6 +636,46 @@
         }
 
         initShadeBuilder();
+
+        // ==================================================
+        // HABITAT DROPDOWN
+        // ==================================================
+        // Built from the UK Broad Habitat classification. Locked to a
+        // dropdown (rather than free text) so future filtering/analysis
+        // isn't undermined by spelling variants of the same habitat.
+        function populateSelectWithOptions(selectEl, options, title) {
+            selectEl.innerHTML = '<option value="">-- ' + title + ' --</option>';
+            for (const option of options) {
+                selectEl.innerHTML += `<option value="${option}">${option}</option>`;
+            }
+        }
+
+        const HABITATS = [
+            "Broadleaved and Mixed Yew Woodland",
+            "Coniferous Woodland",
+            "Boundaries and Linear Features",
+            "Arable and Horticulture",
+            "Improved Grassland",
+            "Neutral Grassland",
+            "Calcareous Grassland",
+            "Acid Grassland",
+            "Bracken",
+            "Dwarf Shrub Heath",
+            "Fen, Marsh, Swamp",
+            "Bog",
+            "Rivers and Streams",
+            "Standing Open Waters, Canals and Ponds",
+            "Montane",
+            "Inland Rock",
+            "Urban",
+            "Supra-littoral Rock",
+            "Supra-littoral Sediment",
+            "Littoral Sediment",
+            "Sea",
+            "Mosaic",
+        ];
+
+        populateSelectWithOptions(document.getElementById('f-habitat'), HABITATS, "Habitat");
 
         // ==================================================
         // SAMPLE FORM
@@ -824,14 +855,278 @@
                 if (!res.ok) throw new Error(data.detail || 'Could not add observation');
 
                 statusEl.innerHTML = `<div class="status-message success">Added. You can add another, or select "Done with this sample".</div>`;
+                const addedTaxonName = obsSearchBox.value || 'this species';
                 document.getElementById('observation-form').reset();
                 selectedTaxonId = null;
                 document.getElementById('obs-taxon-selected').textContent = '';
+
+                renderObservationDemographics(
+                    document.getElementById('new-obs-demographics'),
+                    data.observationID,
+                    addedTaxonName,
+                    []
+                );
+
                 loadMySamples();
             } catch (err) {
                 statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
             }
         });
+
+        // ==================================================
+        // DEMOGRAPHICS & SPECIMENS BUILDER
+        // ==================================================
+        // A demographic group is "N individuals of a given sex/lifestage"
+        // within one observation - an observation can have several (e.g.
+        // "3 male nymphs" AND "1 female adult" from the same specimen
+        // find). A demographic group can, in turn, contain one or more
+        // individually-catalogued specimen records. This same component
+        // is used in two places: right after adding a new observation
+        // (with an empty starting list), and in the "Your submissions"
+        // tree for adding to something already submitted - including
+        // already-verified samples, since demographic/specimen detail
+        // can legitimately be added to a collection over time as more
+        // of it gets identified or catalogued.
+
+        const SHADE_SEX_OPTIONS = ["male", "female", "undetermined", "mixed"];
+        const SHADE_LIFESTAGE_OPTIONS = [
+            "egg", "prolarva", "larva", "protonymph", "deutonymph", "tritonymph",
+            "nymph", "juvenile", "adult", "dead remains", "undetermined", "sign", "gall"
+        ];
+
+        function renderObservationDemographics(containerEl, observationId, taxonLabel, existingDemographics) {
+            containerEl.innerHTML = '';
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'demo-container';
+
+            const existingList = document.createElement('div');
+            (existingDemographics || []).forEach(demo => existingList.appendChild(renderDemoGroupCard(demo)));
+            wrapper.appendChild(existingList);
+
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'toggle-add-link';
+            toggleBtn.textContent = `+ Add demographic detail for ${taxonLabel}`;
+            wrapper.appendChild(toggleBtn);
+
+            const form = buildDemoAddForm(observationId, (newDemo) => {
+                existingList.appendChild(renderDemoGroupCard(newDemo));
+                form.classList.remove('visible');
+            });
+            wrapper.appendChild(form);
+
+            toggleBtn.addEventListener('click', () => form.classList.toggle('visible'));
+
+            containerEl.appendChild(wrapper);
+        }
+
+        function buildDemoAddForm(observationId, onAdded) {
+            const form = document.createElement('div');
+            form.className = 'demo-add-form';
+            form.innerHTML = `
+                <div class="field-row">
+                    <div class="field">
+                        <label>Sex</label>
+                        <select class="demo-sex"></select>
+                    </div>
+                    <div class="field">
+                        <label>Lifestage</label>
+                        <select class="demo-lifestage"></select>
+                    </div>
+                    <div class="field">
+                        <label>Count</label>
+                        <input type="number" class="demo-count" min="0" placeholder="e.g. 1">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Min count <span class="hint">(if a range)</span></label>
+                        <input type="number" class="demo-mincount" min="0">
+                    </div>
+                    <div class="field">
+                        <label>Max count <span class="hint">(if a range)</span></label>
+                        <input type="number" class="demo-maxcount" min="0">
+                    </div>
+                    <div class="field">
+                        <label>Density <span class="hint">(optional)</span></label>
+                        <input type="number" step="any" class="demo-density" placeholder="e.g. 2">
+                    </div>
+                    <div class="field">
+                        <label>Density unit</label>
+                        <input type="text" class="demo-densityunit" placeholder="e.g. per 100cm2">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field full">
+                        <label>Abundance description <span class="hint">(optional, e.g. "very numerous")</span></label>
+                        <input type="text" class="demo-countdesc">
+                    </div>
+                </div>
+                <button type="button" class="small demo-add-btn">Add this demographic group</button>
+                <div class="demo-status"></div>
+            `;
+            populateSelectWithOptions(form.querySelector('.demo-sex'), SHADE_SEX_OPTIONS, 'Sex');
+            populateSelectWithOptions(form.querySelector('.demo-lifestage'), SHADE_LIFESTAGE_OPTIONS, 'Lifestage');
+
+            form.querySelector('.demo-add-btn').addEventListener('click', async () => {
+                const statusEl = form.querySelector('.demo-status');
+                statusEl.innerHTML = '';
+                const payload = {
+                    observationID: observationId,
+                    sex: form.querySelector('.demo-sex').value || null,
+                    lifestage: form.querySelector('.demo-lifestage').value || null,
+                    count: form.querySelector('.demo-count').value || null,
+                    minCount: form.querySelector('.demo-mincount').value || null,
+                    maxCount: form.querySelector('.demo-maxcount').value || null,
+                    density: form.querySelector('.demo-density').value || null,
+                    densityUnit: form.querySelector('.demo-densityunit').value || null,
+                    countDescription: form.querySelector('.demo-countdesc').value || null,
+                };
+                try {
+                    const res = await fetch('/api/v1/submit/demographic', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Could not add demographic group');
+                    onAdded({ ...payload, demographicID: data.demographicID, specimens: [] });
+                } catch (err) {
+                    statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+                }
+            });
+
+            return form;
+        }
+
+        function renderDemoGroupCard(demo) {
+            const card = document.createElement('div');
+            card.className = 'demo-group-card';
+
+            const summaryBits = [demo.sex, demo.lifestage, demo.count ? `count: ${demo.count}` : null].filter(Boolean);
+            const summary = document.createElement('div');
+            summary.className = 'demo-group-summary';
+            summary.textContent = summaryBits.length ? summaryBits.join(' / ') : 'Demographic group';
+            card.appendChild(summary);
+
+            if (demo.densityUnit || demo.countDescription) {
+                const detail = document.createElement('div');
+                detail.className = 'demo-group-detail';
+                detail.textContent = [
+                    demo.density ? `${demo.density} ${demo.densityUnit || ''}`.trim() : null,
+                    demo.countDescription
+                ].filter(Boolean).join(' \u00b7 ');
+                card.appendChild(detail);
+            }
+
+            const specContainer = document.createElement('div');
+            specContainer.className = 'spec-container';
+            (demo.specimens || []).forEach(spec => specContainer.appendChild(renderSpecimenCard(spec)));
+            card.appendChild(specContainer);
+
+            const specToggle = document.createElement('button');
+            specToggle.type = 'button';
+            specToggle.className = 'toggle-add-link';
+            specToggle.textContent = '+ Add a specimen record';
+            card.appendChild(specToggle);
+
+            const specForm = buildSpecimenAddForm(demo.demographicID, (newSpec) => {
+                specContainer.appendChild(renderSpecimenCard(newSpec));
+                specForm.classList.remove('visible');
+            });
+            card.appendChild(specForm);
+
+            specToggle.addEventListener('click', () => specForm.classList.toggle('visible'));
+
+            return card;
+        }
+
+        function buildSpecimenAddForm(demographicId, onAdded) {
+            const form = document.createElement('div');
+            form.className = 'demo-add-form';
+            form.innerHTML = `
+                <div class="field-row">
+                    <div class="field">
+                        <label>Specimen count <span class="hint">(usually 1)</span></label>
+                        <input type="number" class="spec-count" min="0" value="1">
+                    </div>
+                    <div class="field">
+                        <label>Preservation</label>
+                        <input type="text" class="spec-preservation" placeholder="e.g. In ethanol, slide mount">
+                    </div>
+                    <div class="field">
+                        <label>Type <span class="hint">(if a type specimen)</span></label>
+                        <select class="spec-type"></select>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Held at</label>
+                        <input type="text" class="spec-location" placeholder="e.g. NHM London">
+                    </div>
+                    <div class="field">
+                        <label>Reference / accession number</label>
+                        <input type="text" class="spec-ref">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field full">
+                        <label>Comments</label>
+                        <input type="text" class="spec-comments">
+                    </div>
+                </div>
+                <button type="button" class="small spec-add-btn">Add this specimen</button>
+                <div class="spec-status"></div>
+            `;
+            populateSelectWithOptions(
+                form.querySelector('.spec-type'),
+                ["Holotype", "Paratype", "Allotype", "Lectotype", "Syntype", "Neotype", "Not a type specimen"],
+                "Type"
+            );
+
+            form.querySelector('.spec-add-btn').addEventListener('click', async () => {
+                const statusEl = form.querySelector('.spec-status');
+                statusEl.innerHTML = '';
+                const payload = {
+                    demographicID: demographicId,
+                    specCount: form.querySelector('.spec-count').value || null,
+                    specPreservation: form.querySelector('.spec-preservation').value || null,
+                    specType: form.querySelector('.spec-type').value || null,
+                    specLocation: form.querySelector('.spec-location').value || null,
+                    specRef: form.querySelector('.spec-ref').value || null,
+                    specComments: form.querySelector('.spec-comments').value || null,
+                };
+                try {
+                    const res = await fetch('/api/v1/submit/specimen', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Could not add specimen');
+                    onAdded({ ...payload, specimenID: data.specimenID });
+                } catch (err) {
+                    statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+                }
+            });
+
+            return form;
+        }
+
+        function renderSpecimenCard(spec) {
+            const card = document.createElement('div');
+            card.className = 'spec-card';
+            const bits = [
+                spec.specimenID,
+                spec.specPreservation,
+                spec.specLocation ? `held at ${spec.specLocation}` : null,
+                spec.specRef,
+                spec.specType && spec.specType !== 'Not a type specimen' ? spec.specType : null,
+            ].filter(Boolean);
+            card.textContent = bits.join(' \u00b7 ');
+            return card;
+        }
 
         // ==================================================
         // YOUR SUBMISSIONS LIST
@@ -867,7 +1162,8 @@
                                         <span class="status-tag">${o.verification_status}</span>
                                         ${o.verification_status === 'pending' ? `<button class="small danger" style="margin-left:8px;" onclick="withdrawObservation('${o.observationID}')">Withdraw</button>` : ''}
                                     </span>
-                                </div>`;
+                                </div>
+                                <div id="demo-container-${o.observationID}"></div>`;
                         });
                     }
 
@@ -889,6 +1185,16 @@
                         </div>
                     `;
                     listEl.appendChild(card);
+
+                    // Demographics builders need to run AFTER the card's
+                    // HTML is actually in the DOM, since they look up
+                    // their container div by ID
+                    sample.observations.forEach(o => {
+                        const demoContainer = document.getElementById(`demo-container-${o.observationID}`);
+                        if (demoContainer) {
+                            renderObservationDemographics(demoContainer, o.observationID, o.scientificName, o.demographics || []);
+                        }
+                    });
                 });
             } catch (err) {
                 listEl.innerHTML = '<p class="no-samples-message">Could not load your submissions.</p>';
