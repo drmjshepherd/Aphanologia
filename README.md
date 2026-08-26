@@ -720,4 +720,8 @@ These were achieved using updates to main.py, index.html, submit.html, taxonomy.
 
 [Migration-13fuzzy_search_and_source-of-record_structure.sql](Migration-13fuzzy_search_and_source-of-record_structure.sql)
 
+##Set up superuser taxononmy editing facility
 
+A new admin_activity_log table was inserted into the database in the same pattern as the verification-actions table and web_taxonid_seq was created for new taxonIDs.  This was acheived by running:
+
+[Migration-14_admin_taxonomy_editor.sql]()
