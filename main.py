@@ -56,6 +56,22 @@ def require_contributor(request: Request):
         raise HTTPException(status_code=403, detail="Your account needs contributor access to submit records")
     return user
 
+def require_superuser(request: Request):
+    """
+    Same pattern as require_contributor, but for tools that should
+    only be available to Matthew and other trusted admins - e.g. the
+    schema viewer, and later the review/approval screen. Deliberately
+    a separate function (rather than reusing require_contributor with
+    a different role list) so each endpoint's permission requirement
+    is obvious at a glance from which dependency it uses.
+    """
+    user = request.session.get("user")
+    if not user:
+        raise HTTPException(status_code=401, detail="You must be signed in to do this")
+    if user["role"] not in ("superuser", "hyperuser"):
+        raise HTTPException(status_code=403, detail="This tool is restricted to superusers")
+    return user
+
 @app.get("/", response_class=FileResponse)
 def serve_landing():
     return FileResponse("landing.html")
@@ -67,6 +83,18 @@ def serve_map():
 @app.get("/taxonomy", response_class=FileResponse)
 def serve_taxonomy():
     return FileResponse("taxonomy.html")
+
+@app.get("/submit", response_class=FileResponse)
+def serve_submit():
+    return FileResponse("submit.html")
+
+@app.get("/schema", response_class=FileResponse)
+def serve_schema_viewer():
+    return FileResponse("schema.html")
+
+@app.get("/review", response_class=FileResponse)
+def serve_review():
+    return FileResponse("review.html")
 
 
 #==========================================================
@@ -301,21 +329,25 @@ def get_taxonomy_detail(taxon_id: str = Path(..., description="The taxonID to fe
 @app.get("/api/v1/taxonomy/search")
 def search_taxonomy(
     q: str = Query(..., min_length=3, description="Search text (minimum 3 characters). Separate alternative searches with OR; space-separated words within a search are combined with AND."),
-    limit: int = Query(15, ge=1, le=50, description="Maximum number of matches to return")
+    limit: int = Query(25, ge=1, le=50, description="Maximum number of matches to return")
 ):
     """
     Searches every taxon name in the database in one go - accepted
     names, doubtful names, misapplied names, and synonyms all live
-    in the same taxonomy table, so this naturally covers all of them
-    (aim iv in the project README: 'searchable using boolean
-    searches, which will link to any taxonomic entry, accepted or
-    not').
+    in the same taxonomy table, so this naturally covers all of them.
 
-    Basic boolean support: the query is split on the word 'OR' into
-    separate alternative searches; within each, every space-separated
-    word must appear somewhere in the name (an implicit AND).
-    e.g. "carabodes minusculus" finds names containing both words;
-    "carabodes OR chamobates" finds names matching either.
+    Two layers of matching:
+      1. The existing boolean logic - split on 'OR', AND together the
+         space-separated words within each group. This stays exact
+         (no typo tolerance) and is the primary match.
+      2. A fuzzy trigram fallback on the whole query, so a misspelled
+         search still surfaces close matches even when the boolean
+         match finds nothing.
+
+    Results are ranked with an exact-prefix match first (so searching
+    "Nothrus" surfaces the genus Nothrus itself before the many
+    Ameronothrus species that merely contain "nothrus" mid-word),
+    then by trigram similarity to the query, then alphabetically.
     """
     or_groups = [g.strip() for g in re.split(r'\bOR\b', q, flags=re.IGNORECASE) if g.strip()]
     if not or_groups:
@@ -339,7 +371,17 @@ def search_taxonomy(
         if not group_clauses:
             return {"query": q, "count": 0, "results": []}
 
-        where_sql = " OR ".join(group_clauses)
+        boolean_where_sql = " OR ".join(group_clauses)
+
+        # Fuzzy fallback uses the whole query string (not split into
+        # words/groups) against the trigram index - this is what
+        # catches typos the exact boolean matching above would miss.
+        where_sql = f"({boolean_where_sql}) OR (\"scientificName\" %% %s)"
+        params.append(q)
+
+        # Ranking: exact prefix match first, then trigram similarity,
+        # then alphabetical as a final tiebreaker
+        params_for_order = [f"{q}%", q]
 
         sql = f"""
             SELECT
@@ -350,10 +392,13 @@ def search_taxonomy(
                 "taxonomicStatus" AS taxonomic_status
             FROM taxonomy
             WHERE {where_sql}
-            ORDER BY "scientificName"
+            ORDER BY
+                CASE WHEN "scientificName" ILIKE %s THEN 0 ELSE 1 END,
+                similarity("scientificName", %s) DESC,
+                "scientificName" ASC
             LIMIT %s;
         """
-        params.append(limit)
+        params = params + params_for_order + [limit]
 
         cursor.execute(sql, params)
         rows = cursor.fetchall()
@@ -444,6 +489,62 @@ def get_taxonomy_photos(
         cursor.close()
         conn.close()       
         
+@app.get("/api/v1/taxonomy/literature/{taxon_id}")
+def get_taxon_literature(taxon_id: str = Path(..., description="The taxonID to fetch linked literature for")):
+    """
+    Returns the literature references linked to a taxon via
+    taxonomy_literature_junction, grouped by relationship type
+    (taxonomy/synonymy source, name first published in, as used in,
+    presence in UK from), each formatted as a single readable citation
+    string with a clickable link where sourceURL is available.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                j."Type" AS relationship_type,
+                l."sourceURL" AS url,
+                CONCAT_WS(', ',
+                    NULLIF(l."authorName", ''),
+                    NULLIF(l."yearPublished", ''),
+                    NULLIF(NULLIF(CONCAT('"', l."articleTitle", '"'), '""'), '"null"'),
+                    NULLIF(l."publicationTitle", ''),
+                    NULLIF(l."publicationSeries", ''),
+                    NULLIF(NULLIF(CONCAT('Vol. ', l."publicationVolume"), 'Vol. '), 'Vol. null'),
+                    NULLIF(NULLIF(CONCAT('No. ', l."publicationIssue"), 'No. '), 'No. null'),
+                    NULLIF(NULLIF(CONCAT('pp. ', l."publicationPages"), 'pp. '), 'pp. null'),
+                    NULLIF(NULLIF(CONCAT('ISBN/ISSN: ', l."publicationISBNorISSN"), 'ISBN/ISSN: '), 'ISBN/ISSN: null'),
+                    NULLIF(NULLIF(CONCAT('DOI: ', l."publicationDOI"), 'DOI: '), 'DOI: null')
+                ) AS formatted_ref
+            FROM taxonomy_literature_junction j
+            JOIN literature l ON j."litID" = l."litID"
+            WHERE j.taxonid = %s
+            ORDER BY j."Type", l."yearPublished" DESC, l."authorName" ASC;
+        """, (taxon_id,))
+
+        rows = cursor.fetchall()
+        grouped = {
+            "Taxonomy or synonymy from": [],
+            "Name first published in": [],
+            "As used in": [],
+            "Presence in UK from": []
+        }
+        for row in rows:
+            rel_type = row["relationship_type"]
+            if rel_type in grouped:
+                grouped[rel_type].append({
+                    "formatted_ref": row["formatted_ref"],
+                    "url": row["url"]
+                })
+        return {"literature": grouped}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
 # ===============================================================
 # MEDIA RETRIEVAL FROM IMAGE ARCHIVE FILE STRUCTURE
 # ===============================================================
@@ -618,9 +719,46 @@ class SampleSubmission(BaseModel):
     latestDateCollected: Optional[str] = None
     habitat: Optional[str] = None
     microhabitat: Optional[str] = None
+    SHADe: Optional[str] = None  # e.g. "TsSc-5-6-5" - built by the guided SHADe picker on the submission form
     samplingProtocol: Optional[str] = None
     recordedBy: Optional[str] = None
     eventRemarks: Optional[str] = None
+
+    # Source of record - what kind of source this sample came from, and
+    # (for the two structured categories) a link to the specific
+    # literature reference or project it came from. dataSource[free text]
+    # itself is composed server-side from these, so the historic
+    # free-text convention already in that column stays consistent for
+    # new rows too.
+    sourceCategory: Optional[str] = None  # e.g. "Personal collection", "Formal project or survey", "Published literature", "Museum or institutional collection", "Recording event", "Other"
+    sourceLiteratureID: Optional[str] = None   # set when sourceCategory == "Published literature"
+    sourceProjectID: Optional[int] = None      # set when sourceCategory == "Formal project or survey"
+    sourceOtherDetail: Optional[str] = None    # free text for any category, e.g. which museum, or event name
+
+
+class LiteratureSubmission(BaseModel):
+    authorName: Optional[str] = None
+    editorName: Optional[str] = None
+    yearPublished: Optional[str] = None
+    articleTitle: Optional[str] = None
+    publicationTitle: Optional[str] = None
+    publicationSeries: Optional[str] = None
+    publicationVolume: Optional[str] = None
+    publicationIssue: Optional[str] = None
+    publicationTotalpages: Optional[str] = None
+    publicationPages: Optional[str] = None
+    publishedBy: Optional[str] = None
+    publicationISBNorISSN: Optional[str] = None
+    publicationDOI: Optional[str] = None
+    sourceURL: Optional[str] = None
+    litNotes: Optional[str] = None
+
+
+class ProjectSubmission(BaseModel):
+    project_name: str
+    project_category: str  # "Survey or monitoring programme" | "Biological records centre bulk download"
+    website_url: Optional[str] = None
+    description: Optional[str] = None
 
 
 class ObservationSubmission(BaseModel):
@@ -632,6 +770,41 @@ class ObservationSubmission(BaseModel):
     basisOfRecord: Optional[str] = None
     idTechnique: Optional[str] = None
     idText: Optional[str] = None
+
+
+class DemographicSubmission(BaseModel):
+    observationID: str  # which observation this demographic group belongs to
+    sex: Optional[str] = None            # dropdown: male / female / undetermined / mixed
+    lifestage: Optional[str] = None      # dropdown: egg / prolarva / larva / protonymph / deutonymph / tritonymph / nymph / juvenile / adult / dead remains / undetermined / sign / gall
+    count: Optional[str] = None          # stored as text in the DB, but entered as a number on the form
+    density: Optional[str] = None
+    densityUnit: Optional[str] = None
+    minCount: Optional[str] = None
+    maxCount: Optional[str] = None
+    countDescription: Optional[str] = None
+
+
+class SpecimenSubmission(BaseModel):
+    demographicID: str  # which demographic group this specimen belongs to
+    specCount: Optional[str] = None
+    specLocation: Optional[str] = None
+    specRef: Optional[str] = None
+    specPreservation: Optional[str] = None
+    specType: Optional[str] = None
+    specComments: Optional[str] = None
+    # specBarcode and specPhotos are deliberately NOT included here - both
+    # are legacy double-precision columns from the original import (same
+    # blank-column mistyping bug as elsewhere) and have been functionally
+    # superseded: barcode data now belongs in specimen_barcodes, and
+    # photos already go through observation_media (which links directly
+    # to specimen_id). Wiring the form to the old columns would just
+    # create a second, wrong place for this data to live.
+
+
+class VerificationActionSubmission(BaseModel):
+    action_type: str  # 'accepted' | 'rejected' | 'reassigned' | 'queried'
+    notes: Optional[str] = None
+    reassigned_taxon_id: Optional[str] = None  # required only when action_type == 'reassigned'
 
 
 @app.post("/api/v1/submit/sample")
@@ -649,21 +822,60 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
         cursor.execute("SELECT nextval('web_eventid_seq');")
         new_id = f"WEB-{cursor.fetchone()['nextval']}"
 
+        # Compose the dataSource[free text] summary. Historic rows in
+        # this column hold plain descriptive text (e.g. "Matthew
+        # Shepherd personal collection") - new rows follow the same
+        # spirit, built from the structured category/link the
+        # contributor picked, so the column stays readable at a glance
+        # even though the real link now lives in a junction table.
+        data_source_summary = payload.sourceCategory or None
+        if payload.sourceCategory == "Published literature" and payload.sourceLiteratureID:
+            cursor.execute("""
+                SELECT CONCAT_WS(', ', "authorName", "yearPublished", "articleTitle") AS summary
+                FROM literature WHERE "litID" = %s;
+            """, (payload.sourceLiteratureID,))
+            lit_row = cursor.fetchone()
+            if lit_row and lit_row["summary"]:
+                data_source_summary = f"Published literature: {lit_row['summary']}"
+        elif payload.sourceCategory == "Formal project or survey" and payload.sourceProjectID:
+            cursor.execute("SELECT project_name FROM recording_projects WHERE project_id = %s;", (payload.sourceProjectID,))
+            proj_row = cursor.fetchone()
+            if proj_row:
+                data_source_summary = f"Formal project or survey: {proj_row['project_name']}"
+        elif payload.sourceOtherDetail:
+            data_source_summary = f"{payload.sourceCategory}: {payload.sourceOtherDetail}" if payload.sourceCategory else payload.sourceOtherDetail
+
         cursor.execute("""
             INSERT INTO samples (
                 "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
                 "coordinateuncertaintyinmeters", "earliestDateCollected", "latestDateCollected",
-                "habitat", "microhabitat", "samplingProtocol", "recordedBy", "eventRemarks",
+                "habitat", "microhabitat", "SHADe", "samplingProtocol", "recordedBy", "eventRemarks",
+                "dataSource[free text]",
                 submitted_by_user_id, entered_by, entered_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
             );
         """, (
             new_id, payload.samplingLocation, payload.decimalLatitude, payload.decimalLongitude,
             payload.coordinateUncertaintyInMeters, payload.earliestDateCollected, payload.latestDateCollected,
-            payload.habitat, payload.microhabitat, payload.samplingProtocol, payload.recordedBy, payload.eventRemarks,
+            payload.habitat, payload.microhabitat, payload.SHADe, payload.samplingProtocol, payload.recordedBy, payload.eventRemarks,
+            data_source_summary,
             user["user_id"], user["display_name"]
         ))
+
+        # Link to the specific literature reference or project, if one
+        # was chosen - this is what actually makes the source
+        # queryable/traceable later, not just descriptive text.
+        if payload.sourceCategory == "Published literature" and payload.sourceLiteratureID:
+            cursor.execute("""
+                INSERT INTO sample_literature_junction ("eventID", "Type", "litID")
+                VALUES (%s, %s, %s);
+            """, (new_id, "source of record", payload.sourceLiteratureID))
+        elif payload.sourceCategory == "Formal project or survey" and payload.sourceProjectID:
+            cursor.execute("""
+                INSERT INTO sample_project_junction ("eventID", project_id, type)
+                VALUES (%s, %s, %s);
+            """, (new_id, payload.sourceProjectID, "source of record"))
 
         # Build the spatial point immediately, if coordinates were given,
         # so this sample behaves identically to imported data on the map
@@ -679,6 +891,149 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Could not create sample: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ==========================================================
+# LITERATURE & PROJECT LOOKUP (source-of-record picker)
+# ==========================================================
+
+@app.get("/api/v1/literature/search")
+def search_literature(
+    q: str = Query(..., min_length=2, description="Fuzzy search across author, title, year, publication"),
+    limit: int = Query(15, ge=1, le=50)
+):
+    """
+    Fuzzy (typo-tolerant) search across literature entries, for the
+    "choose a reference" picker on the sample submission form. Matches
+    on a combination of author, article title, year, and publication
+    title - ranked by trigram similarity, with an exact-substring match
+    boosted to the top since that's usually what a contributor is
+    actually looking for.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                "litID" AS lit_id,
+                CONCAT_WS(', ', "authorName", "yearPublished", "articleTitle", "publicationTitle") AS formatted_ref,
+                "sourceURL" AS url,
+                similarity(search_text, %s) AS sim
+            FROM literature
+            WHERE search_text %% %s OR search_text ILIKE %s
+            ORDER BY
+                CASE WHEN search_text ILIKE %s THEN 0 ELSE 1 END,
+                sim DESC
+            LIMIT %s;
+        """, (q, q, f"%{q}%", f"%{q}%", limit))
+        rows = cursor.fetchall()
+        return {"query": q, "count": len(rows), "results": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/literature")
+def create_literature(payload: LiteratureSubmission, user: dict = Depends(require_contributor)):
+    """
+    Adds a new literature entry - used when a contributor needs to
+    cite a reference as their sample's source of record, and it isn't
+    already catalogued. Gets a WEB-prefixed litID, same convention as
+    every other web-submitted ID in this project.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT nextval('web_litid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO literature (
+                "litID", "authorName", "editorName", "yearPublished", "articleTitle",
+                "publicationTitle", "publicationSeries", "publicationVolume", "publicationIssue",
+                "publicationTotalpages", "publicationPages", "publishedBy",
+                "publicationISBNorISSN", "publicationDOI", "sourceURL", "litNotes"
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            );
+        """, (
+            new_id, payload.authorName, payload.editorName, payload.yearPublished, payload.articleTitle,
+            payload.publicationTitle, payload.publicationSeries, payload.publicationVolume, payload.publicationIssue,
+            payload.publicationTotalpages, payload.publicationPages, payload.publishedBy,
+            payload.publicationISBNorISSN, payload.publicationDOI, payload.sourceURL, payload.litNotes
+        ))
+        conn.commit()
+        return {"litID": new_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create literature entry: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/projects/search")
+def search_projects(
+    q: str = Query(..., min_length=2, description="Fuzzy search across project name"),
+    limit: int = Query(15, ge=1, le=50)
+):
+    """
+    Fuzzy search across recording_projects, for the "choose a project"
+    picker on the sample submission form.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                project_id, project_name, project_category, website_url,
+                similarity(project_name, %s) AS sim
+            FROM recording_projects
+            WHERE project_name %% %s OR project_name ILIKE %s
+            ORDER BY
+                CASE WHEN project_name ILIKE %s THEN 0 ELSE 1 END,
+                sim DESC
+            LIMIT %s;
+        """, (q, q, f"%{q}%", f"%{q}%", limit))
+        rows = cursor.fetchall()
+        return {"query": q, "count": len(rows), "results": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/projects")
+def create_project(payload: ProjectSubmission, user: dict = Depends(require_contributor)):
+    """
+    Adds a new recording project/survey/records-centre-bulk-download -
+    used when a contributor's sample comes from a formal project that
+    isn't already catalogued.
+    """
+    valid_categories = {"Survey or monitoring programme", "Biological records centre bulk download"}
+    if payload.project_category not in valid_categories:
+        raise HTTPException(status_code=400, detail=f"project_category must be one of {sorted(valid_categories)}")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO recording_projects (project_name, project_category, website_url, description, submitted_by_user_id)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING project_id;
+        """, (payload.project_name, payload.project_category, payload.website_url, payload.description, user["user_id"]))
+        new_id = cursor.fetchone()["project_id"]
+        conn.commit()
+        return {"project_id": new_id}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create project: {str(e)}")
     finally:
         cursor.close()
         conn.close()
@@ -734,6 +1089,104 @@ def submit_observation(payload: ObservationSubmission, user: dict = Depends(requ
         conn.close()
 
 
+@app.post("/api/v1/submit/demographic")
+def submit_demographic(payload: DemographicSubmission, user: dict = Depends(require_contributor)):
+    """
+    Adds one demographic group (e.g. "1 female adult") to an existing
+    observation. Call this repeatedly with the same observationID if
+    an observation contains more than one demographic group (e.g. "3
+    male nymphs" AND "1 female adult" from the same sample).
+    Only allows adding to an observation this same user submitted.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT submitted_by_user_id FROM observations WHERE "observationID" = %s;', (payload.observationID,))
+        obs = cursor.fetchone()
+        if not obs:
+            raise HTTPException(status_code=404, detail="No such observation (observationID)")
+        if obs["submitted_by_user_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only add demographic details to your own submitted observations")
+
+        cursor.execute("SELECT nextval('web_demographicid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO observation_demographics (
+                "demographicID", "observationID", sex, lifestage, count,
+                density, "densityUnit", "minCount", "maxCount", "countDescription"
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            );
+        """, (
+            new_id, payload.observationID, payload.sex, payload.lifestage, payload.count,
+            payload.density, payload.densityUnit, payload.minCount, payload.maxCount, payload.countDescription
+        ))
+        conn.commit()
+        return {"demographicID": new_id, "observationID": payload.observationID}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create demographic group: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/submit/specimen")
+def submit_specimen(payload: SpecimenSubmission, user: dict = Depends(require_contributor)):
+    """
+    Adds one physical specimen record to an existing demographic group.
+    A demographic group can contain more than one specimen record (e.g.
+    if several individuals from the same group were each retained and
+    catalogued separately) - call this repeatedly with the same
+    demographicID for each one.
+    Ownership is checked by following demographicID -> observationID ->
+    submitted_by_user_id, since specimens don't record the submitter
+    directly - only allows adding to your own submitted material.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT o.submitted_by_user_id
+            FROM observation_demographics d
+            JOIN observations o ON d."observationID" = o."observationID"
+            WHERE d."demographicID" = %s;
+        """, (payload.demographicID,))
+        demographic = cursor.fetchone()
+        if not demographic:
+            raise HTTPException(status_code=404, detail="No such demographic group (demographicID)")
+        if demographic["submitted_by_user_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only add specimens to your own submitted material")
+
+        cursor.execute("SELECT nextval('web_specimenid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO specimens (
+                "specimenID", "demographicID", "specCount", "specLocation",
+                "specRef", "specPreservation", "specType", "specComments"
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s
+            );
+        """, (
+            new_id, payload.demographicID, payload.specCount, payload.specLocation,
+            payload.specRef, payload.specPreservation, payload.specType, payload.specComments
+        ))
+        conn.commit()
+        return {"specimenID": new_id, "demographicID": payload.demographicID}
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create specimen record: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @app.get("/api/v1/submit/my-pending")
 def list_my_pending(user: dict = Depends(require_contributor)):
     """
@@ -755,6 +1208,112 @@ def list_my_pending(user: dict = Depends(require_contributor)):
             ORDER BY o.entered_at DESC;
         """, (user["user_id"],))
         return {"pending_observations": cursor.fetchall()}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/submit/my-samples")
+def list_my_samples(user: dict = Depends(require_contributor)):
+    """
+    Lists every sample the logged-in user has submitted (regardless of
+    whether its observations are still pending, or already reviewed),
+    with that sample's own observations nested inside it under
+    "observations" - and each observation's own demographic groups
+    nested under IT as "demographics", each of which has its own
+    specimen records nested as "specimens". Unlike /my-pending (which
+    returns a flat list of observations only, with no sample-level
+    details), this gives the submission page everything it needs to:
+      - show "your submissions" as the full natural tree: sample ->
+        observations -> demographic groups -> specimens
+      - offer "use this sample as a starting point for a new one",
+        since all the sample-level fields are present here to copy
+      - let a contributor add another observation, demographic group,
+        or specimen to something they already started, directly from
+        this list, without needing to remember any of its IDs
+    Only ever returns this user's own samples - never anyone else's.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
+                "coordinateuncertaintyinmeters" AS "coordinateUncertaintyInMeters",
+                "earliestDateCollected", "latestDateCollected",
+                "habitat", "microhabitat", "SHADe", "samplingProtocol",
+                "recordedBy", "eventRemarks", entered_at
+            FROM samples
+            WHERE submitted_by_user_id = %s
+            ORDER BY entered_at DESC;
+        """, (user["user_id"],))
+        samples = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT
+                o."observationID", o."eventID", o."taxonID",
+                t."scientificName", o.verification_status, o.entered_at
+            FROM observations o
+            JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            WHERE o.submitted_by_user_id = %s
+            ORDER BY o.entered_at ASC;
+        """, (user["user_id"],))
+        observations = cursor.fetchall()
+
+        # Demographics and specimens don't record submitted_by_user_id
+        # directly, so we reach them by following observationID (and
+        # then demographicID) back to the observations this user owns -
+        # simplest to just pull every demographic/specimen row attached
+        # to any observation already known to be theirs, from above.
+        observation_ids = [o["observationID"] for o in observations]
+        demographics = []
+        specimens = []
+        if observation_ids:
+            cursor.execute("""
+                SELECT "demographicID", "observationID", sex, lifestage, count,
+                       density, "densityUnit", "minCount", "maxCount", "countDescription"
+                FROM observation_demographics
+                WHERE "observationID" = ANY(%s)
+                ORDER BY "demographicID" ASC;
+            """, (observation_ids,))
+            demographics = cursor.fetchall()
+
+            demographic_ids = [d["demographicID"] for d in demographics]
+            if demographic_ids:
+                cursor.execute("""
+                    SELECT "specimenID", "demographicID", "specCount", "specLocation",
+                           "specRef", "specPreservation", "specType", "specComments"
+                    FROM specimens
+                    WHERE "demographicID" = ANY(%s)
+                    ORDER BY "specimenID" ASC;
+                """, (demographic_ids,))
+                specimens = cursor.fetchall()
+
+        # Nest specimens under their demographic group...
+        specimens_by_demo = {}
+        for spec in specimens:
+            specimens_by_demo.setdefault(spec["demographicID"], []).append(spec)
+        for demo in demographics:
+            demo["specimens"] = specimens_by_demo.get(demo["demographicID"], [])
+
+        # ...then demographic groups (with their specimens already
+        # attached) under their observation...
+        demos_by_obs = {}
+        for demo in demographics:
+            demos_by_obs.setdefault(demo["observationID"], []).append(demo)
+        for obs in observations:
+            obs["demographics"] = demos_by_obs.get(obs["observationID"], [])
+
+        # ...then observations (with everything already attached) under
+        # their parent sample, same as before
+        obs_by_event = {}
+        for obs in observations:
+            obs_by_event.setdefault(obs["eventID"], []).append(obs)
+
+        for sample in samples:
+            sample["observations"] = obs_by_event.get(sample["eventID"], [])
+
+        return {"samples": samples}
     finally:
         cursor.close()
         conn.close()
@@ -839,3 +1398,307 @@ def withdraw_sample(event_id: str, user: dict = Depends(require_contributor)):
     finally:
         cursor.close()
         conn.close()
+
+
+# ==========================================================
+# VERIFICATION / REVIEW (superuser only)
+# ==========================================================
+# Every review decision is written as a new row in
+# observation_verification_actions rather than overwriting a single
+# status field - this keeps a full, permanent history of who reviewed
+# what, when, what they decided, and why. observations.verification_status
+# (and its verified_by/verified_date/verification_notes companions)
+# are kept in sync as a convenience snapshot of the MOST RECENT action,
+# since a lot of existing code (map filtering, the submission page's
+# pending list) already reads that single field - but the actions
+# table is now the source of truth for anything needing history.
+
+@app.get("/api/v1/admin/review-queue")
+def get_review_queue(user: dict = Depends(require_superuser)):
+    """
+    Returns every sample that has at least one pending observation,
+    across ALL contributors (not just the current user) - this is the
+    superuser's queue of work still waiting for a decision. Each
+    sample includes ALL of its observations (not just the pending
+    ones) so a reviewer has full context on the sample as a whole, each
+    with its demographics/specimens nested the same way the
+    contributor's own submission page shows them, plus who submitted
+    it.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT DISTINCT s."eventID"
+            FROM samples s
+            JOIN observations o ON o."eventID" = s."eventID"
+            WHERE o.verification_status = 'pending';
+        """)
+        event_ids = [row["eventID"] for row in cursor.fetchall()]
+
+        if not event_ids:
+            return {"samples": []}
+
+        cursor.execute("""
+            SELECT
+                s."eventID", s."samplingLocation", s."decimalLatitude", s."decimalLongitude",
+                s."earliestDateCollected", s."latestDateCollected", s."habitat", s."microhabitat",
+                s."SHADe", s."samplingProtocol", s."recordedBy", s."eventRemarks", s.entered_at,
+                u.display_name AS submitted_by_name, u.email AS submitted_by_email
+            FROM samples s
+            LEFT JOIN users u ON s.submitted_by_user_id = u.user_id
+            WHERE s."eventID" = ANY(%s)
+            ORDER BY s.entered_at ASC;
+        """, (event_ids,))
+        samples = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT
+                o."observationID", o."eventID", o."taxonID", t."scientificName",
+                o."identifiedBy", o."identificationVerificationStatus", o."identificationRemarks",
+                o."basisOfRecord", o."idTechnique", o."idText[free_text]" AS "idText",
+                o.verification_status, o.entered_at,
+                u.display_name AS submitted_by_name, u.email AS submitted_by_email
+            FROM observations o
+            JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            LEFT JOIN users u ON o.submitted_by_user_id = u.user_id
+            WHERE o."eventID" = ANY(%s)
+            ORDER BY o.entered_at ASC;
+        """, (event_ids,))
+        observations = cursor.fetchall()
+
+        observation_ids = [o["observationID"] for o in observations]
+        demographics, specimens = [], []
+        if observation_ids:
+            cursor.execute("""
+                SELECT "demographicID", "observationID", sex, lifestage, count,
+                       density, "densityUnit", "minCount", "maxCount", "countDescription"
+                FROM observation_demographics
+                WHERE "observationID" = ANY(%s)
+                ORDER BY "demographicID" ASC;
+            """, (observation_ids,))
+            demographics = cursor.fetchall()
+
+            demographic_ids = [d["demographicID"] for d in demographics]
+            if demographic_ids:
+                cursor.execute("""
+                    SELECT "specimenID", "demographicID", "specCount", "specLocation",
+                           "specRef", "specPreservation", "specType", "specComments"
+                    FROM specimens
+                    WHERE "demographicID" = ANY(%s)
+                    ORDER BY "specimenID" ASC;
+                """, (demographic_ids,))
+                specimens = cursor.fetchall()
+
+        specimens_by_demo = {}
+        for spec in specimens:
+            specimens_by_demo.setdefault(spec["demographicID"], []).append(spec)
+        for demo in demographics:
+            demo["specimens"] = specimens_by_demo.get(demo["demographicID"], [])
+
+        demos_by_obs = {}
+        for demo in demographics:
+            demos_by_obs.setdefault(demo["observationID"], []).append(demo)
+        for obs in observations:
+            obs["demographics"] = demos_by_obs.get(obs["observationID"], [])
+
+        obs_by_event = {}
+        for obs in observations:
+            obs_by_event.setdefault(obs["eventID"], []).append(obs)
+        for sample in samples:
+            sample["observations"] = obs_by_event.get(sample["eventID"], [])
+
+        return {"samples": samples}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/verify/{observation_id}")
+def submit_verification_action(
+    observation_id: str,
+    payload: VerificationActionSubmission,
+    user: dict = Depends(require_superuser)
+):
+    """
+    Records a review decision on an observation: accept, reject,
+    reassign to a different taxon, or query (ask the contributor for
+    more information) - always as a NEW row in
+    observation_verification_actions, never overwriting history.
+    Also updates observations' own status fields to match (so existing
+    code that reads verification_status directly still works), and -
+    for a reassignment specifically - writes the corrected taxon into
+    observation_taxonomy_override, which is the table that actually
+    controls what taxon this observation resolves to everywhere else
+    in the site (view_effective_observations, the map, etc.).
+    """
+    valid_actions = {"accepted", "rejected", "reassigned", "queried"}
+    if payload.action_type not in valid_actions:
+        raise HTTPException(status_code=400, detail=f"action_type must be one of {sorted(valid_actions)}")
+    if payload.action_type == "reassigned" and not payload.reassigned_taxon_id:
+        raise HTTPException(status_code=400, detail="reassigned_taxon_id is required when action_type is 'reassigned'")
+
+    status_by_action = {
+        "accepted": "verified",
+        "rejected": "rejected",
+        "reassigned": "verified",
+        "queried": "queried",
+    }
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT "observationID" FROM observations WHERE "observationID" = %s;', (observation_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="No such observation")
+
+        if payload.reassigned_taxon_id:
+            cursor.execute('SELECT "taxonID" FROM taxonomy WHERE "taxonID" = %s;', (payload.reassigned_taxon_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="reassigned_taxon_id does not match any taxon")
+
+        # 1. Log the action - this is the permanent record
+        cursor.execute("""
+            INSERT INTO observation_verification_actions (
+                "observationID", action_type, reassigned_taxon_id, notes, performed_by_user_id
+            ) VALUES (%s, %s, %s, %s, %s);
+        """, (observation_id, payload.action_type, payload.reassigned_taxon_id, payload.notes, user["user_id"]))
+
+        # 2. Update the observation's own snapshot fields to match, so
+        # existing code reading verification_status directly still works
+        cursor.execute("""
+            UPDATE observations
+            SET verification_status = %s,
+                verified_by = %s,
+                verified_date = CURRENT_TIMESTAMP,
+                verification_notes = %s
+            WHERE "observationID" = %s;
+        """, (status_by_action[payload.action_type], user["display_name"], payload.notes, observation_id))
+
+        # 3. For a reassignment, update (or create) the override that
+        # actually controls this observation's effective taxon
+        if payload.action_type == "reassigned":
+            cursor.execute(
+                'SELECT 1 FROM observation_taxonomy_override WHERE observation_id = %s;',
+                (observation_id,)
+            )
+            if cursor.fetchone():
+                cursor.execute("""
+                    UPDATE observation_taxonomy_override
+                    SET revised_taxon_id = %s, reason_or_notes = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE observation_id = %s;
+                """, (payload.reassigned_taxon_id, payload.notes, observation_id))
+            else:
+                cursor.execute("""
+                    INSERT INTO observation_taxonomy_override (observation_id, revised_taxon_id, reason_or_notes)
+                    VALUES (%s, %s, %s);
+                """, (observation_id, payload.reassigned_taxon_id, payload.notes))
+
+        conn.commit()
+        return {"observationID": observation_id, "action_type": payload.action_type, "new_status": status_by_action[payload.action_type]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not record verification action: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ==========================================================
+# SCHEMA VIEWER (superuser only)
+# ==========================================================
+# This reads the database's ACTUAL live structure every time it's
+# called - it never relies on any written record of the schema, so
+# it can never go stale the way a document or a person's memory can.
+# This exists because several migrations have been applied piecemeal
+# over time (column type fixes, added override tables, etc.) and it's
+# become hard to know the current real structure without querying
+# pgAdmin directly. Now that's available in the browser instead.
+
+@app.get("/api/v1/admin/schema")
+def get_live_schema(user: dict = Depends(require_superuser)):
+    """
+    Returns every table in the public schema, each with its columns
+    (name, type, nullable, default) and its foreign key relationships,
+    read live from information_schema and pg_catalog. Superuser only.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+            ORDER BY table_name;
+        """)
+        table_names = [row["table_name"] for row in cursor.fetchall()]
+
+        cursor.execute("""
+            SELECT table_name, column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            ORDER BY table_name, ordinal_position;
+        """)
+        columns_by_table = {}
+        for row in cursor.fetchall():
+            columns_by_table.setdefault(row["table_name"], []).append({
+                "column_name": row["column_name"],
+                "data_type": row["data_type"],
+                "is_nullable": row["is_nullable"],
+                "column_default": row["column_default"],
+            })
+
+        # Foreign keys - which column in which table points at which
+        # other table/column. This is what actually shows how the
+        # tables link together, which is the main thing that's hard
+        # to reconstruct from memory once things have grown organically.
+        cursor.execute("""
+            SELECT
+                tc.table_name AS from_table,
+                kcu.column_name AS from_column,
+                ccu.table_name AS to_table,
+                ccu.column_name AS to_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+            JOIN information_schema.constraint_column_usage ccu
+                ON tc.constraint_name = ccu.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+            ORDER BY from_table, from_column;
+        """)
+        foreign_keys_by_table = {}
+        for row in cursor.fetchall():
+            foreign_keys_by_table.setdefault(row["from_table"], []).append({
+                "from_column": row["from_column"],
+                "to_table": row["to_table"],
+                "to_column": row["to_column"],
+            })
+
+        # Views too - these matter a lot in this project
+        # (view_effective_observations, view_media_with_resolved_taxon)
+        # and are otherwise invisible to a schema-only column listing.
+        cursor.execute("""
+            SELECT table_name AS view_name
+            FROM information_schema.views
+            WHERE table_schema = 'public'
+            ORDER BY table_name;
+        """)
+        view_names = [row["view_name"] for row in cursor.fetchall()]
+
+        tables = []
+        for name in table_names:
+            tables.append({
+                "table_name": name,
+                "columns": columns_by_table.get(name, []),
+                "foreign_keys": foreign_keys_by_table.get(name, []),
+                "row_count_estimate": None,  # left for a future pass if useful
+            })
+
+        return {"tables": tables, "views": view_names}
+    finally:
+        cursor.close()
+        conn.close()
+
