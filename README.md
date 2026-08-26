@@ -698,13 +698,16 @@ This removed dead columns and combined parentnameusageid with parentNameUsageID 
 Some fixes were applied to the landing page, to link it to the "submit.html" page.  Also a literature display was added to the "taxonomy.html" page, along with necessary style elements, a javascript to retrieve the literature data and an endpoint in main.py
 
 ## Review and approval/rejection/reassingment of submitted records
-A review page and table was set up to allow review of submitted records by a superuser, which allowed records to be reviewed accepted, rejected or reassigned.  The table records every action, so that there is a clear log of decisions, rather than overwriting decisions. This may allow rollback or an audit trail for decisions.  The new table was created using:
+While "observations" already had verification_status/verified_by/verified_date/verification_notes, these are a single snapshot so each new review action overwrites the last, so that gave no record of HOW a record reached its current state, who was involved along the way, or why an earlier decision was changed. Given the emphasis on being able to show your reasoning for taxonomic and verification decisions transparently (to the recording community, to the manager of the UKSI, to anyone questioning a call later), this needs to be a proper append-only log: one row per review action, never overwritten or deleted.
+
+This would also directly supports the planned contributor notification bell (a contributor should be told when one of their records is reviewed) via the viewed_by_contributor flag - not built yet, but the data this needs already exists here rather than being bolted on awkwardly later.
+
+A review page and table was set up to allow review of submitted records by a superuser, which allowed records to be reviewed accepted, rejected or reassigned.  A table records every action, so that there is a clear log of decisions, rather than overwriting decisions. This may allow rollback or an audit trail for decisions.  The new table was created using:
 
 [Migration-12verification_actions_table.sql](Migration-12verification_actions_table.sql) 
 
-While "observations" already has verification_status/verified_by/verified_date/verification_notes, but these are a single snapshot so each new review action overwrites the last, so there's no record of HOW a record reached its current state, who was involved along the way, or why an earlier decision was changed. Given the emphasis on being able to show your reasoning for taxonomic and verification decisions transparently (to the recording community, to Chris Raper/NBN, to anyone questioning a call later), this needs to be a proper append-only log: one row per review action, never overwritten or deleted.
-
-This also directly supports the planned contributor notification bell (a contributor should be told when one of their records is reviewed) via the viewed_by_contributor flag - not built yet, but the data this needs already exists here rather than being bolted on awkwardly later.
+and the review page is:
+[review.html](review.html)
 
 ## Additions and tweaks
 Several small fixes were applied:
@@ -720,22 +723,23 @@ These were achieved using updates to main.py, index.html, submit.html, taxonomy.
 
 [Migration-13fuzzy_search_and_source-of-record_structure.sql](Migration-13fuzzy_search_and_source-of-record_structure.sql)
 
-##Set up superuser taxononmy editing facility
+## Set up superuser taxononmy editing facility
 
 A new admin_activity_log table was inserted into the database in the same pattern as the verification-actions table and web_taxonid_seq was created for new taxonIDs.  This was acheived by running:
 
 [Migration-14_admin_taxonomy_editor.sql]()
 
 To [main.py](main.py) was added, right after the verification-action endpoint:
-
+```
 PUT /api/v1/admin/taxonomy/{taxon_id} — full-record save. Validates that reparenting can't create a circular ancestry chain, and that synonymy always points at a genuinely accepted taxon (not another synonym, not a taxon that still has children). Logs a field-by-field diff.
 POST /api/v1/admin/taxonomy — create a new taxon (either placed in the hierarchy via a parent, or created directly as a synonym of an existing accepted taxon).
 GET /api/v1/admin/activity-log — recent changes, or filtered to one taxon's full history.
 New route /admin/taxonomy serving the editor page.
-
-A new page [taxonomy_editor.html](taxonomy_editor.html) was created enableing a super user to search a taxon (reusing the existing fuzzy search), edit its fields, reparent or mark-as-synonym via the same search-and-pick pattern as your map page, see its edit history inline, or create a brand new taxon.
+```
+A new page [taxonomy_editor.html](taxonomy_editor.html) was created enabling a super user to search a taxon (reusing the existing fuzzy search), edit its fields, reparent or mark-as-synonym via the same search-and-pick pattern as your map page, see its edit history inline, or create a brand new taxon.
 
 A navigation link as added to [review.html](review.html) to the new editor.
 
 Currently there is no delete facility, because reassigning/synonymising covers most of your "senus" typo / merge-duplicate use cases without the FK-cascade risk of deletion. Worth a separate conversation if you actually need it.
+
 Reparenting is blocked if it would create a cycle, and synonymising is blocked if the taxon still has children, which must be reparented first.
