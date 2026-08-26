@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia - Taxonomy Editor</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; color: #212529; }
+        #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        #header h1 { margin: 0; font-size: 1.2rem; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #header a.nav-link:hover { text-decoration: underline; }
+        #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
+        #auth-status a { color: white; }
+
+        #page { max-width: 1000px; margin: 0 auto; padding: 24px 20px 80px; }
+        .gate-message { text-align: center; padding: 60px 20px; color: #495057; }
+
+        h2 { color: #1b4332; font-size: 1.1rem; margin: 0 0 4px; }
+        .subtext { color: #6c757d; font-size: 0.85rem; margin: 0 0 16px; }
+
+        .panel { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 18px 20px; margin-bottom: 20px; }
+
+        .taxon-search-wrapper { position: relative; }
+        #taxon-search-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 380px; overflow-y: auto;
+            z-index: 100; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        #taxon-search-dropdown.visible { display: block; }
+        .taxon-result-row { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.88rem; }
+        .taxon-result-row:hover { background: #e9ecef; }
+        .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
+        .taxon-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
+        .taxon-result-row .status-tag { font-size: 0.72rem; color: #b08d1f; margin-left: 6px; }
+
+        input[type=text], input[type=search], select, textarea {
+            width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid #ced4da;
+            border-radius: 4px; font-size: 0.9rem; font-family: inherit;
+        }
+        textarea { resize: vertical; min-height: 44px; }
+
+        .field-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+        .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
+        .field.full { flex-basis: 100%; }
+        .field label { font-weight: 600; font-size: 0.78rem; color: #2d6a4f; }
+        .field .hint { font-size: 0.74rem; color: #868e96; font-weight: normal; }
+
+        .picker-current { font-size: 0.85rem; padding: 6px 0; color: #212529; }
+        .picker-current .placeholder { color: #adb5bd; font-style: italic; }
+        .picker-current button.clear { background: none; border: none; color: #c1666b; font-size: 0.78rem; cursor: pointer; padding: 0 0 0 8px; font-weight: normal; text-decoration: underline; }
+
+        button { background: #2d6a4f; color: white; border: none; padding: 9px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.88rem; }
+        button:hover { background: #1b4332; }
+        button:disabled { background: #adb5bd; cursor: not-allowed; }
+        button.secondary { background: none; border: 1px solid #2d6a4f; color: #2d6a4f; }
+        button.secondary:hover { background: #e9f5ee; }
+        button.small { padding: 5px 10px; font-size: 0.78rem; }
+
+        .save-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+        .save-status { font-size: 0.85rem; }
+        .save-status.error { color: #842029; }
+        .save-status.success { color: #1b4332; font-weight: 600; }
+
+        #create-toggle { margin-bottom: 20px; }
+        #create-panel { display: none; }
+        #create-panel.visible { display: block; }
+
+        .history-entry { border-top: 1px solid #f1f3f5; padding: 10px 0; font-size: 0.83rem; }
+        .history-entry:first-child { border-top: none; }
+        .history-meta { color: #6c757d; margin-bottom: 4px; }
+        .history-meta b { color: #1b4332; }
+        .history-diff-row { padding: 2px 0 2px 12px; color: #495057; }
+        .history-diff-row .field-name { font-weight: 600; color: #2d6a4f; }
+        .history-diff-row .old-val { color: #c1666b; text-decoration: line-through; }
+        .history-diff-row .new-val { color: #1b4332; }
+        .history-notes { color: #495057; font-style: italic; margin-top: 4px; }
+        .no-history { color: #adb5bd; font-size: 0.85rem; font-style: italic; }
+
+        .taxonrank-datalist-note { font-size: 0.72rem; color: #868e96; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <a class="title-link" href="/"><h1>Aphanologia</h1></a>
+        <a class="nav-link" href="/map">Map</a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/review">Review Queue</a>
+        <div id="auth-status">Checking sign-in status&hellip;</div>
+    </div>
+
+    <div id="page">
+        <div id="gate" class="gate-message" style="display:none;"></div>
+
+        <div id="editor-content" style="display:none;">
+            <h2>Taxonomy Editor</h2>
+            <p class="subtext">Search for a taxon to rename, reparent, mark as a synonym, or edit its details. Every save is logged with who made the change and what changed.</p>
+
+            <div class="panel">
+                <div class="field full">
+                    <label for="mainTaxonSearch">Search taxa</label>
+                    <div class="taxon-search-wrapper">
+                        <input type="text" id="mainTaxonSearch" placeholder="e.g. Veigaia or Oribatida" autocomplete="off">
+                        <div id="taxon-search-dropdown"></div>
+                    </div>
+                </div>
+                <div id="create-toggle">
+                    <button type="button" class="secondary small" onclick="toggleCreatePanel()">+ Create new taxon</button>
+                </div>
+
+                <div id="create-panel">
+                    <h2 style="font-size:1rem;">New taxon</h2>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="newScientificName">Scientific name *</label>
+                            <input type="text" id="newScientificName">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="newAuthorship">Authorship</label>
+                            <input type="text" id="newAuthorship">
+                        </div>
+                        <div class="field">
+                            <label for="newRank">Rank *</label>
+                            <input type="text" id="newRank" list="rankOptions" placeholder="e.g. Species, Genus, Family">
+                        </div>
+                        <div class="field">
+                            <label for="newStatus">Taxonomic status</label>
+                            <input type="text" id="newStatus" list="statusOptions" value="accepted">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label>Placement * &mdash; either a parent (new taxon in the hierarchy) or an accepted name (new synonym)</label>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label>Parent taxon</label>
+                            <div class="taxon-search-wrapper">
+                                <input type="text" id="newParentSearch" placeholder="Search for parent..." autocomplete="off">
+                                <div id="new-parent-dropdown" class="taxon-search-wrapper"></div>
+                            </div>
+                            <div class="picker-current" id="newParentCurrent"><span class="placeholder">Not set</span></div>
+                        </div>
+                        <div class="field">
+                            <label>OR: accepted name (creates a synonym instead)</label>
+                            <div class="taxon-search-wrapper">
+                                <input type="text" id="newAcceptedSearch" placeholder="Search for accepted taxon..." autocomplete="off">
+                                <div id="new-accepted-dropdown" class="taxon-search-wrapper"></div>
+                            </div>
+                            <div class="picker-current" id="newAcceptedCurrent"><span class="placeholder">Not set</span></div>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="newRemarks">Remarks</label>
+                            <textarea id="newRemarks"></textarea>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="newNotes">Reason for creating this taxon <span class="hint">(saved to the activity log)</span></label>
+                            <textarea id="newNotes"></textarea>
+                        </div>
+                    </div>
+                    <div class="save-row">
+                        <button type="button" onclick="createTaxon()">Create taxon</button>
+                        <span class="save-status" id="createStatus"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="edit-panel" class="panel" style="display:none;">
+                <h2 id="editHeading">Edit taxon</h2>
+                <p class="subtext" id="editSubheading"></p>
+
+                <div class="field-row">
+                    <div class="field full">
+                        <label for="editScientificName">Scientific name *</label>
+                        <input type="text" id="editScientificName">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="editAuthorship">Authorship</label>
+                        <input type="text" id="editAuthorship">
+                    </div>
+                    <div class="field">
+                        <label for="editRank">Rank *</label>
+                        <input type="text" id="editRank" list="rankOptions">
+                    </div>
+                    <div class="field">
+                        <label for="editStatus">Taxonomic status</label>
+                        <input type="text" id="editStatus" list="statusOptions">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="editNomenclaturalStatus">Nomenclatural status</label>
+                        <input type="text" id="editNomenclaturalStatus">
+                    </div>
+                </div>
+
+                <div class="field-row">
+                    <div class="field">
+                        <label>Parent taxon <span class="hint">(reparent within the hierarchy)</span></label>
+                        <div class="taxon-search-wrapper">
+                            <input type="text" id="editParentSearch" placeholder="Search to change parent..." autocomplete="off">
+                            <div id="edit-parent-dropdown" class="taxon-search-wrapper"></div>
+                        </div>
+                        <div class="picker-current" id="editParentCurrent"><span class="placeholder">None (top-level taxon)</span></div>
+                    </div>
+                    <div class="field">
+                        <label>Accepted name <span class="hint">(set this to mark as a synonym)</span></label>
+                        <div class="taxon-search-wrapper">
+                            <input type="text" id="editAcceptedSearch" placeholder="Search to mark as synonym of..." autocomplete="off">
+                            <div id="edit-accepted-dropdown" class="taxon-search-wrapper"></div>
+                        </div>
+                        <div class="picker-current" id="editAcceptedCurrent"><span class="placeholder">Not a synonym</span></div>
+                    </div>
+                </div>
+
+                <div class="field-row">
+                    <div class="field full">
+                        <label for="editRemarks">Remarks</label>
+                        <textarea id="editRemarks"></textarea>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field full">
+                        <label for="editNotes">Reason for this edit <span class="hint">(saved to the activity log, not shown on the taxon itself)</span></label>
+                        <textarea id="editNotes" placeholder="e.g. Fixing 'senus' typo per data-issue list"></textarea>
+                    </div>
+                </div>
+
+                <div class="save-row">
+                    <button type="button" onclick="saveTaxonEdit()">Save changes</button>
+                    <span class="save-status" id="editStatus"></span>
+                </div>
+            </div>
+
+            <div id="history-panel" class="panel" style="display:none;">
+                <h2 style="font-size:1rem;">Edit history</h2>
+                <div id="historyList"></div>
+            </div>
+        </div>
+    </div>
+
+    <datalist id="rankOptions">
+        <option value="Kingdom"><option value="Phylum"><option value="Class"><option value="Subclass">
+        <option value="Order"><option value="Suborder"><option value="Infraorder"><option value="Superfamily">
+        <option value="Family"><option value="Subfamily"><option value="Tribe"><option value="Genus">
+        <option value="Subgenus"><option value="Species"><option value="Subspecies"><option value="Forma">
+    </datalist>
+    <datalist id="statusOptions">
+        <option value="accepted"><option value="synonym"><option value="doubtful"><option value="misapplied">
+    </datalist>
+
+    <script>
+        let currentUser = null;
+
+        fetch('/api/v1/auth/me')
+            .then(r => r.json())
+            .then(data => {
+                const authEl = document.getElementById('auth-status');
+                if (data.logged_in) {
+                    authEl.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout">Sign out</a>`;
+                } else {
+                    authEl.innerHTML = `<a href="/auth/login">Sign in with Google</a>`;
+                }
+                currentUser = data.logged_in ? data : null;
+                gateContent();
+            })
+            .catch(() => gateContent());
+
+        function gateContent() {
+            const gate = document.getElementById('gate');
+            const content = document.getElementById('editor-content');
+            if (currentUser && (currentUser.role === 'superuser' || currentUser.role === 'hyperuser')) {
+                gate.style.display = 'none';
+                content.style.display = 'block';
+            } else {
+                gate.style.display = 'block';
+                content.style.display = 'none';
+                gate.textContent = currentUser
+                    ? 'This tool is restricted to superusers.'
+                    : 'Please sign in with a superuser account to use the taxonomy editor.';
+            }
+        }
+
+        // ---------- generic taxon search-and-pick, reused for the
+        // main search box plus the four parent/accepted pickers ----------
+        function wireTaxonPicker(inputId, dropdownId, onPick) {
+            const input = document.getElementById(inputId);
+            const dropdown = document.getElementById(dropdownId);
+            let timer = null;
+            input.addEventListener('input', () => {
+                clearTimeout(timer);
+                const query = input.value.trim();
+                if (query.length < 3) {
+                    dropdown.classList.remove('visible');
+                    dropdown.innerHTML = '';
+                    return;
+                }
+                timer = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=25`);
+                        const data = await res.json();
+                        dropdown.innerHTML = '';
+                        if (data.results.length === 0) {
+                            dropdown.innerHTML = '<div class="taxon-result-row">No matches</div>';
+                        } else {
+                            data.results.forEach(t => {
+                                const row = document.createElement('div');
+                                row.className = 'taxon-result-row';
+                                row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank || ''}</span><span class="status-tag">${t.taxonomic_status || ''}</span>`;
+                                row.addEventListener('click', () => {
+                                    dropdown.classList.remove('visible');
+                                    input.value = '';
+                                    onPick(t);
+                                });
+                                dropdown.appendChild(row);
+                            });
+                        }
+                        dropdown.classList.add('visible');
+                    } catch (err) {
+                        dropdown.classList.remove('visible');
+                    }
+                }, 300);
+            });
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.taxon-search-wrapper') || e.target !== input) {
+                    if (!dropdown.contains(e.target)) dropdown.classList.remove('visible');
+                }
+            });
+        }
+
+        // ---------- main search: loads a taxon into the edit panel ----------
+        wireTaxonPicker('mainTaxonSearch', 'taxon-search-dropdown', (t) => loadTaxonForEdit(t.taxon_id));
+
+        let editingTaxonId = null;
+        let editParentId = null;
+        let editAcceptedId = null;
+
+        async function loadTaxonForEdit(taxonId) {
+            const res = await fetch(`/api/v1/taxonomy/detail/${encodeURIComponent(taxonId)}`);
+            if (!res.ok) { alert('Could not load that taxon.'); return; }
+            const t = await res.json();
+            editingTaxonId = t.taxonID;
+            editParentId = t.parentNameUsageID || null;
+            editAcceptedId = t.acceptedNameUsageID || null;
+
+            document.getElementById('editHeading').textContent = `Editing: ${t.scientificName}`;
+            document.getElementById('editSubheading').textContent = `taxonID: ${t.taxonID}`;
+            document.getElementById('editScientificName').value = t.scientificName || '';
+            document.getElementById('editAuthorship').value = t.scientificnameAuthorship || '';
+            document.getElementById('editRank').value = t.taxonrank || '';
+            document.getElementById('editStatus').value = t.taxonomicStatus || '';
+            document.getElementById('editNomenclaturalStatus').value = t.nomenclaturalStatus || '';
+            document.getElementById('editRemarks').value = t.taxonRemarks || '';
+            document.getElementById('editNotes').value = '';
+
+            updatePickerDisplay('editParentCurrent', t.parent_scientific_name, t.parentNameUsageID, 'None (top-level taxon)', clearEditParent);
+            updatePickerDisplay('editAcceptedCurrent', t.accepted_scientific_name, t.acceptedNameUsageID, 'Not a synonym', clearEditAccepted);
+
+            document.getElementById('edit-panel').style.display = 'block';
+            setSaveStatus('editStatus', '', '');
+            loadHistory(t.taxonID);
+        }
+
+        function updatePickerDisplay(elId, label, id, placeholder, clearFn) {
+            const el = document.getElementById(elId);
+            if (id) {
+                el.innerHTML = `<i>${label || id}</i> <span style="color:#adb5bd;">(${id})</span> <button type="button" class="clear">clear</button>`;
+                el.querySelector('button.clear').addEventListener('click', clearFn);
+            } else {
+                el.innerHTML = `<span class="placeholder">${placeholder}</span>`;
+            }
+        }
+
+        function clearEditParent() { editParentId = null; updatePickerDisplay('editParentCurrent', null, null, 'None (top-level taxon)', clearEditParent); }
+        function clearEditAccepted() { editAcceptedId = null; updatePickerDisplay('editAcceptedCurrent', null, null, 'Not a synonym', clearEditAccepted); }
+
+        wireTaxonPicker('editParentSearch', 'edit-parent-dropdown', (t) => {
+            editParentId = t.taxon_id;
+            updatePickerDisplay('editParentCurrent', t.scientific_name, t.taxon_id, '', clearEditParent);
+        });
+        wireTaxonPicker('editAcceptedSearch', 'edit-accepted-dropdown', (t) => {
+            editAcceptedId = t.taxon_id;
+            updatePickerDisplay('editAcceptedCurrent', t.scientific_name, t.taxon_id, '', clearEditAccepted);
+        });
+
+        function setSaveStatus(elId, text, cls) {
+            const el = document.getElementById(elId);
+            el.textContent = text;
+            el.className = 'save-status' + (cls ? ' ' + cls : '');
+        }
+
+        async function saveTaxonEdit() {
+            if (!editingTaxonId) return;
+            const payload = {
+                scientificName: document.getElementById('editScientificName').value,
+                scientificnameAuthorship: document.getElementById('editAuthorship').value,
+                taxonrank: document.getElementById('editRank').value,
+                taxonomicStatus: document.getElementById('editStatus').value,
+                nomenclaturalStatus: document.getElementById('editNomenclaturalStatus').value,
+                taxonRemarks: document.getElementById('editRemarks').value,
+                parentNameUsageID: editParentId,
+                acceptedNameUsageID: editAcceptedId,
+                notes: document.getElementById('editNotes').value
+            };
+            setSaveStatus('editStatus', 'Saving...', '');
+            try {
+                const res = await fetch(`/api/v1/admin/taxonomy/${encodeURIComponent(editingTaxonId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('editStatus', data.detail || 'Save failed.', 'error');
+                    return;
+                }
+                if (data.changed_fields.length === 0) {
+                    setSaveStatus('editStatus', 'No changes to save.', '');
+                } else {
+                    setSaveStatus('editStatus', `Saved (${data.changed_fields.join(', ')}).`, 'success');
+                    loadHistory(editingTaxonId);
+                }
+            } catch (err) {
+                setSaveStatus('editStatus', 'Save failed: ' + err, 'error');
+            }
+        }
+
+        // ---------- create new taxon ----------
+        function toggleCreatePanel() {
+            document.getElementById('create-panel').classList.toggle('visible');
+        }
+
+        let newParentId = null;
+        let newAcceptedId = null;
+
+        wireTaxonPicker('newParentSearch', 'new-parent-dropdown', (t) => {
+            newParentId = t.taxon_id;
+            newAcceptedId = null;
+            updatePickerDisplay('newParentCurrent', t.scientific_name, t.taxon_id, '', () => { newParentId = null; updatePickerDisplay('newParentCurrent', null, null, 'Not set', () => {}); });
+            updatePickerDisplay('newAcceptedCurrent', null, null, 'Not set', () => {});
+        });
+        wireTaxonPicker('newAcceptedSearch', 'new-accepted-dropdown', (t) => {
+            newAcceptedId = t.taxon_id;
+            newParentId = null;
+            updatePickerDisplay('newAcceptedCurrent', t.scientific_name, t.taxon_id, '', () => { newAcceptedId = null; updatePickerDisplay('newAcceptedCurrent', null, null, 'Not set', () => {}); });
+            updatePickerDisplay('newParentCurrent', null, null, 'Not set', () => {});
+        });
+
+        async function createTaxon() {
+            const payload = {
+                scientificName: document.getElementById('newScientificName').value,
+                scientificnameAuthorship: document.getElementById('newAuthorship').value,
+                taxonrank: document.getElementById('newRank').value,
+                taxonomicStatus: document.getElementById('newStatus').value,
+                taxonRemarks: document.getElementById('newRemarks').value,
+                parentNameUsageID: newParentId,
+                acceptedNameUsageID: newAcceptedId,
+                notes: document.getElementById('newNotes').value
+            };
+            setSaveStatus('createStatus', 'Creating...', '');
+            try {
+                const res = await fetch('/api/v1/admin/taxonomy', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('createStatus', data.detail || 'Could not create taxon.', 'error');
+                    return;
+                }
+                setSaveStatus('createStatus', `Created ${data.taxonID}.`, 'success');
+                loadTaxonForEdit(data.taxonID);
+            } catch (err) {
+                setSaveStatus('createStatus', 'Failed: ' + err, 'error');
+            }
+        }
+
+        // ---------- activity/edit history ----------
+        async function loadHistory(taxonId) {
+            const panel = document.getElementById('history-panel');
+            const list = document.getElementById('historyList');
+            panel.style.display = 'block';
+            list.innerHTML = 'Loading...';
+            try {
+                const res = await fetch(`/api/v1/admin/activity-log?table_name=taxonomy&record_id=${encodeURIComponent(taxonId)}`);
+                const data = await res.json();
+                if (data.entries.length === 0) {
+                    list.innerHTML = '<div class="no-history">No edits recorded yet.</div>';
+                    return;
+                }
+                list.innerHTML = '';
+                data.entries.forEach(e => {
+                    const div = document.createElement('div');
+                    div.className = 'history-entry';
+                    const when = new Date(e.performed_at).toLocaleString();
+                    let diffHtml = '';
+                    if (e.field_changes) {
+                        for (const [field, change] of Object.entries(e.field_changes)) {
+                            diffHtml += `<div class="history-diff-row"><span class="field-name">${field}:</span> <span class="old-val">${change.old ?? '(blank)'}</span> &rarr; <span class="new-val">${change.new ?? '(blank)'}</span></div>`;
+                        }
+                    }
+                    div.innerHTML = `
+                        <div class="history-meta"><b>${e.performed_by_name || 'Unknown'}</b> &middot; ${e.action_type} &middot; ${when}</div>
+                        ${diffHtml}
+                        ${e.notes ? `<div class="history-notes">"${e.notes}"</div>` : ''}
+                    `;
+                    list.appendChild(div);
+                });
+            } catch (err) {
+                list.innerHTML = '<div class="no-history">Could not load history.</div>';
+            }
+        }
+    </script>
+</body>
+</html>
