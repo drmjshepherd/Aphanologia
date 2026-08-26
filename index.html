@@ -4,20 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aphanologia - UK Acari Distribution Portal</title>
-    
-    <!-- Leaflet CSS -->
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- Leaflet MarkerCluster CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-    
+
     <style>
         body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         #header h1 { margin: 0; font-size: 1.2rem; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #header a.nav-link:hover { text-decoration: underline; }
         #container { display: flex; height: calc(100vh - 50px); }
-        
-        /* Control Sidebar Panel */
+
         #sidebar {
             width: 320px;
             background: #f8f9fa;
@@ -29,19 +29,27 @@
             gap: 15px;
             overflow-y: auto;
         }
-
         .control-group { display: flex; flex-direction: column; gap: 5px; }
         .control-group label { font-weight: 600; font-size: 0.85rem; color: #2d6a4f; }
+        .taxon-search-wrapper { position: relative; }
+        #taxon-search-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 400px; overflow-y: auto;
+            z-index: 1000; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        #taxon-search-dropdown.visible { display: block; }
+        .taxon-search-result-row { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.88rem; color: #212529; }
+        .taxon-search-result-row:hover { background: #e9ecef; }
+        .taxon-search-result-row .sci-name { font-style: italic; color: #1b4332; }
+        .taxon-search-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
         .control-group input, .control-group select {
             padding: 8px;
             border: 1px solid #ced4da;
             border-radius: 4px;
             font-size: 0.9rem;
         }
-
         .year-inputs { display: flex; gap: 10px; }
         .year-inputs input { width: 50%; }
-
         button {
             background: #2d6a4f;
             color: white;
@@ -53,7 +61,6 @@
             transition: background 0.2s;
         }
         button:hover { background: #1b4332; }
-
         #stats {
             margin-top: auto;
             padding: 10px;
@@ -62,25 +69,25 @@
             font-size: 0.85rem;
             color: #495057;
         }
-
         #map { flex-grow: 1; height: 100%; }
         .popup-title { font-weight: bold; font-style: italic; color: #1b4332; font-size: 14px; }
     </style>
 </head>
 <body>
-
     <div id="header">
-        <h1>Aphanologia: British Acari Biological Records Map</h1>
+        <a class="title-link" href="/"><h1>Aphanologia: British Acari Biological Records Map</h1></a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
     </div>
-    
+
     <div id="container">
-        <!-- Sidebar Controls -->
         <div id="sidebar">
             <div class="control-group">
                 <label for="taxonSearch">Taxon Filter (Name / Genus / Family)</label>
-                <input type="text" id="taxonSearch" placeholder="e.g. Veigaia or Oribatida">
+                <div class="taxon-search-wrapper">
+                    <input type="text" id="taxonSearch" placeholder="e.g. Veigaia or Oribatida" autocomplete="off">
+                    <div id="taxon-search-dropdown"></div>
+                </div>
             </div>
-
             <div class="control-group">
                 <label>Date Range (Years)</label>
                 <div class="year-inputs">
@@ -88,60 +95,115 @@
                     <input type="number" id="endYear" placeholder="To (e.g. 2026)">
                 </div>
             </div>
-
             <div class="control-group">
                 <label for="displayMode">Map Display Mode</label>
                 <select id="displayMode">
+                    <option value="points" selected>Individual Point Overlay</option>
                     <option value="cluster">Expandable Clusters</option>
-                    <option value="points">Individual Point Overlay</option>
                 </select>
             </div>
-
             <div class="control-group">
                 <label for="markerRadius">Dot Radius Size: <span id="radiusVal">6</span>px</label>
                 <input type="range" id="markerRadius" min="2" max="20" value="6">
             </div>
-
             <button onclick="loadMapData()">Apply Filters & Refresh Map</button>
-
             <div id="stats">
                 <b>Plotted Records:</b> <span id="recordCount">0</span>
             </div>
         </div>
-
-        <!-- Map Canvas -->
         <div id="map"></div>
     </div>
 
-    <!-- Leaflet & MarkerCluster Libraries -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-    
-    <script>
-        // Center initial map view on Exeter / South West England
-        const map = L.map('map').setView([50.72, -3.53], 7);
 
+    <script>
+        const map = L.map('map').setView([52.9, -1.5], 6);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors | Aphanologia'
         }).addTo(map);
-
         let geoJsonLayer = null;
         let clusterGroup = L.markerClusterGroup();
 
-        // Update displayed radius value dynamically
         document.getElementById('markerRadius').addEventListener('input', function(e) {
             document.getElementById('radiusVal').textContent = e.target.value;
-            if (geoJsonLayer) loadMapData(); // Re-render markers with new radius
+            if (geoJsonLayer) loadMapData();
         });
-
-        // Trigger reload when toggling display mode
         document.getElementById('displayMode').addEventListener('change', loadMapData);
 
-                // Reads a value from the page's own URL, e.g. ?taxon_id=5630
         function getUrlParameter(name) {
             const params = new URLSearchParams(window.location.search);
             return params.get(name);
         }
+
+        // Read any taxon_id from the URL ONCE, when the page first loads.
+        // This is deliberately kept outside loadMapData() so that it
+        // doesn't keep re-imposing itself every time filters are
+        // re-applied - the moment the user edits the search box by hand,
+        // we clear this and switch to using their typed text instead.
+        let overrideTaxonId = getUrlParameter('taxon_id');
+
+        if (overrideTaxonId) {
+            fetch("/api/v1/taxonomy/detail/" + encodeURIComponent(overrideTaxonId))
+                .then(function(response) { return response.json(); })
+                .then(function(json) {
+                    document.getElementById("taxonSearch").value = json.scientificName;
+                });
+        }
+
+        // If the user types in the search box themselves, that should
+        // take priority from then on - stop using the URL's taxon_id
+        // (unless they then pick a suggestion from the dropdown below,
+        // which sets it again deliberately).
+        const taxonSearchBox = document.getElementById('taxonSearch');
+        const taxonSearchDropdown = document.getElementById('taxon-search-dropdown');
+        let taxonSearchTimer = null;
+
+        taxonSearchBox.addEventListener('input', function() {
+            overrideTaxonId = null;
+            clearTimeout(taxonSearchTimer);
+            const query = taxonSearchBox.value.trim();
+            if (query.length < 3) {
+                taxonSearchDropdown.classList.remove('visible');
+                return;
+            }
+            // Fuzzy (typo-tolerant) search, same endpoint the taxonomy
+            // browser and submission form use - lets someone find
+            // "Nothrus" even if they type "Nothurs", and ranks a short
+            // exact genus match above longer names that merely contain it.
+            taxonSearchTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=25`);
+                    const data = await res.json();
+                    taxonSearchDropdown.innerHTML = '';
+                    if (data.results.length === 0) {
+                        taxonSearchDropdown.innerHTML = '<div class="taxon-search-result-row">No matching taxa - showing free-text results instead</div>';
+                    } else {
+                        data.results.forEach(t => {
+                            const row = document.createElement('div');
+                            row.className = 'taxon-search-result-row';
+                            row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank}</span>`;
+                            row.addEventListener('click', () => {
+                                overrideTaxonId = t.taxon_id;
+                                taxonSearchBox.value = t.scientific_name;
+                                taxonSearchDropdown.classList.remove('visible');
+                                loadMapData();
+                            });
+                            taxonSearchDropdown.appendChild(row);
+                        });
+                    }
+                    taxonSearchDropdown.classList.add('visible');
+                } catch (err) {
+                    taxonSearchDropdown.classList.remove('visible');
+                }
+            }, 300);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.taxon-search-wrapper')) {
+                taxonSearchDropdown.classList.remove('visible');
+            }
+        });
 
         function loadMapData() {
             const taxon = document.getElementById('taxonSearch').value;
@@ -149,25 +211,16 @@
             const endYear = document.getElementById('endYear').value;
             const radius = parseInt(document.getElementById('markerRadius').value);
             const displayMode = document.getElementById('displayMode').value;
-            const taxonIdFromUrl = getUrlParameter('taxon_id');
 
-            // Build API URL with Query Parameters
             let url = `/api/v1/observations/geojson?limit=50000`;
-            if (taxonIdFromUrl) {
-                // Arrived here from the taxonomy browser: filter precisely
-                // by taxonID (includes all descendants and synonyms)
-                url += `&taxon_id=${encodeURIComponent(taxonIdFromUrl)}`;
-				fetch("/api/v1/taxonomy/detail/"+encodeURIComponent(taxonIdFromUrl)) // human written wow! fetches api taxon data
-							.then(function(response) { return response.json(); })  // not sure exactly what this line does but it doesnt work without it
-							.then(function(json) {document.getElementById("taxonSearch").value = json.scientificName}); // sets value in text box to the scientific name
+            if (overrideTaxonId) {
+                url += `&taxon_id=${encodeURIComponent(overrideTaxonId)}`;
             } else if (taxon) {
-                // Ordinary text search typed into the sidebar box
                 url += `&taxon_name=${encodeURIComponent(taxon)}`;
             }
             if (startYear) url += `&start_year=${startYear}`;
             if (endYear) url += `&end_year=${endYear}`;
 
-            // Clear existing map layers
             if (geoJsonLayer) map.removeLayer(geoJsonLayer);
             clusterGroup.clearLayers();
             map.removeLayer(clusterGroup);
@@ -176,7 +229,6 @@
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('recordCount').textContent = data.count.toLocaleString();
-
                     geoJsonLayer = L.geoJSON(data, {
                         pointToLayer: function (feature, latlng) {
                             return L.circleMarker(latlng, {
@@ -201,8 +253,6 @@
                             layer.bindPopup(popupContent);
                         }
                     });
-
-                    // Render based on user's mode choice
                     if (displayMode === 'cluster') {
                         clusterGroup.addLayer(geoJsonLayer);
                         map.addLayer(clusterGroup);
@@ -213,7 +263,6 @@
                 .catch(error => console.error('Error fetching map data:', error));
         }
 
-        // Initial Data Load
         loadMapData();
     </script>
 </body>
