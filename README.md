@@ -666,9 +666,11 @@ This script was run to ensure that all the misapplications were treated at the s
 
 [Migration-9backfill_acceptednameusage.sql](Migration-9backfill_acceptednameusage.sql)
 
-The form was set up, to allow entry of a sample details and then allow one or more observations to the sample.  This didn't initially include demongraphic and specimen details, so these were added later (not yet!)
+The form was set up, to allow entry of a sample details and then allow one or more observations to the sample.  This didn't initially include demongraphic and specimen details, so these were added later.  
 
+[submit.html](submit.html)
 
+Earlier versions 
 
 ##Database Schema viewer
 A new page
