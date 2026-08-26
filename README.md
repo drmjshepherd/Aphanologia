@@ -725,3 +725,17 @@ These were achieved using updates to main.py, index.html, submit.html, taxonomy.
 A new admin_activity_log table was inserted into the database in the same pattern as the verification-actions table and web_taxonid_seq was created for new taxonIDs.  This was acheived by running:
 
 [Migration-14_admin_taxonomy_editor.sql]()
+
+To [main.py](main.py) was added, right after the verification-action endpoint:
+
+PUT /api/v1/admin/taxonomy/{taxon_id} — full-record save. Validates that reparenting can't create a circular ancestry chain, and that synonymy always points at a genuinely accepted taxon (not another synonym, not a taxon that still has children). Logs a field-by-field diff.
+POST /api/v1/admin/taxonomy — create a new taxon (either placed in the hierarchy via a parent, or created directly as a synonym of an existing accepted taxon).
+GET /api/v1/admin/activity-log — recent changes, or filtered to one taxon's full history.
+New route /admin/taxonomy serving the editor page.
+
+A new page [taxonomy_editor.html](taxonomy_editor.html) was created enableing a super user to search a taxon (reusing the existing fuzzy search), edit its fields, reparent or mark-as-synonym via the same search-and-pick pattern as your map page, see its edit history inline, or create a brand new taxon.
+
+A navigation link as added to [review.html](review.html) to the new editor.
+
+Currently there is no delete facility, because reassigning/synonymising covers most of your "senus" typo / merge-duplicate use cases without the FK-cascade risk of deletion. Worth a separate conversation if you actually need it.
+Reparenting is blocked if it would create a cycle, and synonymising is blocked if the taxon still has children, which must be reparented first.
