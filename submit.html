@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia - Submit a Record</title>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; color: #212529; }
+        #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        #header h1 { margin: 0; font-size: 1.2rem; white-space: nowrap; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #header a.nav-link:hover { text-decoration: underline; }
+        #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
+        #auth-status a { color: white; }
+
+        #page { max-width: 780px; margin: 0 auto; padding: 30px 20px 80px; }
+
+        .panel {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 22px 24px;
+            margin-bottom: 24px;
+        }
+        .panel h2 { color: #1b4332; font-size: 1.1rem; margin-top: 0; }
+        .panel-intro { color: #6c757d; font-size: 0.88rem; margin-top: -8px; margin-bottom: 18px; }
+
+        .field-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+        .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 180px; }
+        .field.full { flex-basis: 100%; }
+        .field label { font-weight: 600; font-size: 0.82rem; color: #2d6a4f; }
+        .field .hint { font-weight: 400; color: #adb5bd; font-size: 0.75rem; }
+        .field input, .field select, .field textarea {
+            padding: 8px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-family: inherit;
+        }
+        .field textarea { resize: vertical; min-height: 50px; }
+
+        button {
+            background: #2d6a4f;
+            color: white;
+            border: none;
+            padding: 9px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.88rem;
+            transition: background 0.2s;
+        }
+        button:hover { background: #1b4332; }
+        button:disabled { background: #ced4da; cursor: not-allowed; }
+        button.secondary { background: none; border: 1px solid #2d6a4f; color: #2d6a4f; }
+        button.secondary:hover { background: #e9f5ee; }
+        button.danger { background: none; border: 1px solid #c1666b; color: #c1666b; }
+        button.danger:hover { background: #fbebec; }
+        button.small { padding: 5px 10px; font-size: 0.78rem; }
+
+        .status-message { padding: 10px 14px; border-radius: 4px; font-size: 0.85rem; margin-top: 10px; }
+        .status-message.success { background: #d8f3dc; color: #1b4332; }
+        .status-message.error { background: #fbebec; color: #842029; }
+
+        .gate-message { text-align: center; padding: 60px 20px; color: #495057; }
+        .gate-message a { color: #2d6a4f; font-weight: bold; }
+
+        /* --- SHADe builder --- */
+        #shade-builder {
+            border: 1px dashed #b7d9c4;
+            border-radius: 6px;
+            padding: 16px;
+            background: #f4faf6;
+        }
+        #shade-builder .shade-step { margin-bottom: 14px; }
+        #shade-builder .shade-step:last-child { margin-bottom: 0; }
+        #shade-builder .shade-step-label { font-weight: 600; font-size: 0.82rem; color: #2d6a4f; margin-bottom: 4px; display: block; }
+        #shade-preview {
+            font-family: 'Consolas', monospace;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #1b4332;
+            background: white;
+            border: 1px solid #b7d9c4;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-top: 10px;
+            letter-spacing: 0.5px;
+        }
+        #shade-preview .placeholder-part { color: #ced4da; }
+        .shade-help-btn {
+            background: none; border: none; color: #2d6a4f; text-decoration: underline;
+            font-size: 0.78rem; font-weight: normal; padding: 0; cursor: pointer;
+        }
+        .acidity-lookup-results {
+            font-size: 0.8rem; color: #495057; margin-top: 4px; max-height: 100px; overflow-y: auto;
+        }
+        .acidity-lookup-results .match-row { padding: 3px 0; cursor: pointer; }
+        .acidity-lookup-results .match-row:hover { color: #2d6a4f; font-weight: 600; }
+
+        /* --- Taxon search (observation form) --- */
+        .taxon-search-wrapper { position: relative; }
+        #obs-taxon-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 420px; overflow-y: auto;
+            z-index: 50; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        #obs-taxon-dropdown.visible { display: block; }
+        .taxon-result-row { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.88rem; }
+        .taxon-result-row:hover { background: #e9ecef; }
+        .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
+        .taxon-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
+        #obs-taxon-selected {
+            margin-top: 6px; font-size: 0.85rem; color: #2d6a4f; font-weight: 600; font-style: italic;
+        }
+
+        /* --- Pending submissions list --- */
+        .sample-card { border: 1px solid #dee2e6; border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+        .sample-card-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+        .sample-card-header .event-id { font-family: 'Consolas', monospace; font-size: 0.78rem; color: #868e96; }
+        .sample-card-header .sample-title { font-weight: 600; color: #1b4332; }
+        .sample-card-meta { font-size: 0.8rem; color: #6c757d; margin: 4px 0 10px; }
+        .obs-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 6px 10px; border-radius: 4px; background: #f8f9fa; margin-bottom: 6px; font-size: 0.87rem;
+        }
+        .obs-row .sci-name { font-style: italic; }
+        .obs-row .status-tag {
+            font-size: 0.7rem; padding: 1px 7px; border-radius: 8px; margin-left: 8px;
+            background: #e8a33d; color: white;
+        }
+        .card-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .no-samples-message { color: #adb5bd; font-style: italic; font-size: 0.88rem; }
+
+        /* --- Demographics & specimens (nested under an observation) --- */
+        .demo-container { margin-top: 10px; padding-left: 14px; border-left: 2px solid #d8e9de; }
+        .demo-group-card {
+            background: #f4faf6; border: 1px solid #d8e9de; border-radius: 6px;
+            padding: 10px 12px; margin-bottom: 8px;
+        }
+        .demo-group-summary { font-size: 0.85rem; color: #1b4332; font-weight: 600; }
+        .demo-group-detail { font-size: 0.78rem; color: #6c757d; margin-top: 2px; }
+        .demo-add-form {
+            border: 1px dashed #ced4da; border-radius: 6px; padding: 12px; margin-top: 8px;
+            display: none;
+        }
+        .demo-add-form.visible { display: block; }
+        .demo-add-form .field-row { margin-bottom: 10px; }
+        .demo-add-form .field label { font-size: 0.78rem; }
+        .spec-container { margin-top: 8px; padding-left: 14px; border-left: 2px dotted #ced4da; }
+        .spec-card {
+            background: white; border: 1px solid #e9ecef; border-radius: 4px;
+            padding: 6px 10px; margin-bottom: 6px; font-size: 0.8rem; color: #495057;
+        }
+        .toggle-add-link {
+            background: none; border: none; color: #2d6a4f; font-size: 0.78rem;
+            text-decoration: underline; cursor: pointer; padding: 0; font-weight: 600;
+        }
+
+        /* --- Source of record picker --- */
+        #source-picker { border: 1px dashed #b7d9c4; border-radius: 6px; padding: 14px 16px; background: #f4faf6; margin-bottom: 4px; }
+        .source-search-wrapper { position: relative; }
+        .source-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 300px; overflow-y: auto;
+            z-index: 60; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .source-dropdown.visible { display: block; }
+        .source-result-row { padding: 7px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.85rem; }
+        .source-result-row:hover { background: #e9ecef; }
+        .source-selected-note { margin-top: 6px; font-size: 0.83rem; color: #2d6a4f; font-weight: 600; }
+        .source-add-form {
+            border: 1px dashed #ced4da; border-radius: 6px; padding: 12px; margin-top: 10px; display: none;
+        }
+        .source-add-form.visible { display: block; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <a class="title-link" href="/"><h1>Aphanologia: Submit a Record</h1></a>
+        <a class="nav-link" href="/map">Map</a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <div id="auth-status"></div>
+    </div>
+
+    <div id="page">
+
+        <div id="gate" class="gate-message" style="display: none;"></div>
+
+        <div id="main-content" style="display: none;">
+
+            <!-- ============================================= -->
+            <!-- PANEL 1: New sample                            -->
+            <!-- ============================================= -->
+            <div class="panel" id="new-sample-panel">
+                <h2>1. Start a new sample</h2>
+                <p class="panel-intro">
+                    A sample is a single sampling event &mdash; one visit to one place, which might contain
+                    one specimen or many. Once you've created it, you'll add one or more species
+                    observations to it below.
+                </p>
+
+                <form id="sample-form">
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="f-source-category">Source of record</label>
+                            <select id="f-source-category"></select>
+                        </div>
+                    </div>
+
+                    <div id="source-picker" style="display:none;">
+                        <!-- Published literature picker -->
+                        <div id="source-literature-block" style="display:none;">
+                            <div class="field-row">
+                                <div class="field full source-search-wrapper">
+                                    <label>Find the reference</label>
+                                    <input type="text" id="source-lit-search" placeholder="Search by author, title, or year..." autocomplete="off">
+                                    <div id="source-lit-dropdown" class="source-dropdown"></div>
+                                    <div id="source-lit-selected" class="source-selected-note"></div>
+                                </div>
+                            </div>
+                            <button type="button" class="toggle-add-link" onclick="document.getElementById('source-lit-add-form').classList.toggle('visible')">+ Can't find it? Add a new reference</button>
+                            <div id="source-lit-add-form" class="source-add-form">
+                                <div class="field-row">
+                                    <div class="field"><label>Author(s)</label><input type="text" id="lit-author"></div>
+                                    <div class="field"><label>Year</label><input type="text" id="lit-year"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field full"><label>Article / chapter title</label><input type="text" id="lit-articletitle"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field"><label>Publication title</label><input type="text" id="lit-pubtitle"></div>
+                                    <div class="field"><label>Volume</label><input type="text" id="lit-volume"></div>
+                                    <div class="field"><label>Pages</label><input type="text" id="lit-pages"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field full"><label>URL <span class="hint">(if available online)</span></label><input type="text" id="lit-url"></div>
+                                </div>
+                                <button type="button" class="small" onclick="addNewLiteratureReference()">Add this reference</button>
+                                <div id="lit-add-status"></div>
+                            </div>
+                        </div>
+
+                        <!-- Formal project / survey picker -->
+                        <div id="source-project-block" style="display:none;">
+                            <div class="field-row">
+                                <div class="field full source-search-wrapper">
+                                    <label>Find the project</label>
+                                    <input type="text" id="source-proj-search" placeholder="Search project name..." autocomplete="off">
+                                    <div id="source-proj-dropdown" class="source-dropdown"></div>
+                                    <div id="source-proj-selected" class="source-selected-note"></div>
+                                </div>
+                            </div>
+                            <button type="button" class="toggle-add-link" onclick="document.getElementById('source-proj-add-form').classList.toggle('visible')">+ Can't find it? Add a new project</button>
+                            <div id="source-proj-add-form" class="source-add-form">
+                                <div class="field-row">
+                                    <div class="field full"><label>Project name</label><input type="text" id="proj-name"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field"><label>Category</label><select id="proj-category"></select></div>
+                                    <div class="field"><label>Website <span class="hint">(if it has one)</span></label><input type="text" id="proj-website"></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field full"><label>Description</label><textarea id="proj-description"></textarea></div>
+                                </div>
+                                <button type="button" class="small" onclick="addNewProject()">Add this project</button>
+                                <div id="proj-add-status"></div>
+                            </div>
+                        </div>
+
+                        <!-- Other categories: just a free-text detail field -->
+                        <div id="source-other-block" style="display:none;">
+                            <div class="field-row">
+                                <div class="field full">
+                                    <label id="source-other-label">Detail</label>
+                                    <input type="text" id="source-other-detail">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="f-location">Sampling location</label>
+                            <input type="text" id="f-location" placeholder="e.g. Burnham Beeches, Buckinghamshire">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-lat">Latitude <span class="hint">(decimal, WGS84)</span></label>
+                            <input type="number" step="any" id="f-lat" placeholder="e.g. 51.5432">
+                        </div>
+                        <div class="field">
+                            <label for="f-lng">Longitude <span class="hint">(decimal, WGS84)</span></label>
+                            <input type="number" step="any" id="f-lng" placeholder="e.g. -0.6234">
+                        </div>
+                        <div class="field">
+                            <label for="f-uncertainty">Coordinate uncertainty <span class="hint">(metres)</span></label>
+                            <input type="number" id="f-uncertainty" placeholder="e.g. 100">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-earliest">Earliest possible date</label>
+                            <input type="date" id="f-earliest">
+                        </div>
+                        <div class="field">
+                            <label for="f-latest">Latest possible date <span class="hint">(same as above if exact)</span></label>
+                            <input type="date" id="f-latest">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-habitat">Habitat <span class="hint">(UK Broad Habitat type)</span></label>
+                            <select id="f-habitat"></select>
+                        </div>
+                        <div class="field">
+                            <label for="f-protocol">Sampling protocol</label>
+                            <input type="text" id="f-protocol" placeholder="e.g. Tullgren funnel, sieve and pooter">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="f-microhabitat">Microhabitat <span class="hint">(free text description)</span></label>
+                            <input type="text" id="f-microhabitat" placeholder="e.g. Under bark of fallen oak log">
+                        </div>
+                    </div>
+
+                    <!-- SHADe builder -->
+                    <div class="field-row">
+                        <div class="field full">
+                            <label>
+                                Microhabitat code (SHADe)
+                                <button type="button" class="shade-help-btn" onclick="toggleShadeExplainer()">what's this?</button>
+                            </label>
+                            <div id="shade-explainer" style="display:none; font-size: 0.8rem; color: #495057; background: #fff8e6; border: 1px solid #f0dca0; border-radius: 4px; padding: 10px; margin-bottom: 8px;">
+                                SHADe records the exact physical situation the specimen was found in &mdash;
+                                its <b>S</b>ubstrate, <b>H</b>umidity, <b>A</b>cidity, and <b>D</b>isturbance history &mdash;
+                                as a short code like <code>TsSc-5-6-5</code>. This is genuinely useful research data:
+                                it's what lets someone later explore which microhabitats a species actually favours,
+                                across every record in the database. Use the tool below to build it step by step
+                                &mdash; you don't need to memorise the codes.
+                            </div>
+                            <div id="shade-builder">
+                                <div class="shade-step">
+                                    <span class="shade-step-label">Substrate 1 (required)</span>
+                                    <div class="field-row" style="margin-bottom: 0;">
+                                        <div class="field"><select id="shade-sub1-major"></select></div>
+                                        <div class="field"><select id="shade-sub1-minor"></select></div>
+                                    </div>
+                                </div>
+                                <div class="shade-step">
+                                    <label style="font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
+                                        <input type="checkbox" id="shade-sub2-toggle">
+                                        This was an interface between two substrates &mdash; add a second one
+                                    </label>
+                                    <div class="field-row" id="shade-sub2-row" style="margin-top: 6px; margin-bottom: 0; display: none;">
+                                        <div class="field"><select id="shade-sub2-major"></select></div>
+                                        <div class="field"><select id="shade-sub2-minor"></select></div>
+                                    </div>
+                                </div>
+                                <div class="shade-step">
+                                    <span class="shade-step-label">Humidity regime</span>
+                                    <select id="shade-humidity"></select>
+                                </div>
+                                <div class="shade-step">
+                                    <span class="shade-step-label">Acidity / alkalinity (pH)</span>
+                                    <div class="field-row" style="margin-bottom: 0;">
+                                        <div class="field">
+                                            <input type="text" id="shade-acidity-lookup" placeholder="Type a plant name to estimate pH...">
+                                            <div class="acidity-lookup-results" id="shade-acidity-results"></div>
+                                        </div>
+                                        <div class="field" style="max-width: 160px;">
+                                            <select id="shade-acidity"></select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="shade-step">
+                                    <span class="shade-step-label">Disturbance history</span>
+                                    <select id="shade-disturbance"></select>
+                                </div>
+                                <div id="shade-preview">TsSc-5-6-5</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-recordedby">Recorded by</label>
+                            <input type="text" id="f-recordedby" placeholder="Your name">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="f-remarks">General remarks <span class="hint">(optional)</span></label>
+                            <textarea id="f-remarks" placeholder="Any other notes on the habitat, microhabitat, or sample"></textarea>
+                        </div>
+                    </div>
+
+                    <button type="submit">Create sample</button>
+                    <div id="sample-status"></div>
+                </form>
+            </div>
+
+            <!-- ============================================= -->
+            <!-- PANEL 2: Add observation (appears once a       -->
+            <!-- sample is active)                              -->
+            <!-- ============================================= -->
+            <div class="panel" id="add-observation-panel" style="display: none;">
+                <h2>2. Add species observations</h2>
+                <p class="panel-intro">
+                    Now add each species found in this sample, one at a time. Working on sample
+                    <b id="active-event-id-label"></b>.
+                </p>
+
+                <form id="observation-form">
+                    <div class="field-row">
+                        <div class="field full taxon-search-wrapper">
+                            <label for="obs-taxon-search">Species / taxon</label>
+                            <input type="text" id="obs-taxon-search" placeholder="Start typing a scientific name (min 3 letters)..." autocomplete="off">
+                            <div id="obs-taxon-dropdown"></div>
+                            <div id="obs-taxon-selected"></div>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="obs-identifiedby">Identified by</label>
+                            <input type="text" id="obs-identifiedby">
+                        </div>
+                        <div class="field">
+                            <label for="obs-verification">Confidence in identification</label>
+                            <select id="obs-verification">
+                                <option value="">-- Select --</option>
+                                <option value="certain">Certain</option>
+                                <option value="probable">Probable</option>
+                                <option value="plausible">Plausible</option>
+                                <option value="unlikely">Unlikely</option>
+                                <option value="unverified">Unverified</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="obs-basis">Basis of record</label>
+                            <select id="obs-basis">
+                                <option value="">-- Select --</option>
+                                <option value="Preserved specimen">Preserved specimen</option>
+                                <option value="Still photograph">Still photograph</option>
+                                <option value="COI barcode">COI barcode</option>
+                                <option value="Human observation">Human observation</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="obs-technique">Identification technique</label>
+                            <select id="obs-technique">
+                                <option value="">-- Select --</option>
+                                <option value="Morphological">Morphological observation</option>
+                                <option value="Genetic">Genetics</option>
+                                <option value="Image recognition">Image recognition</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="obs-idtext">Notes <span class="hint">(ecology, behaviour etc. - not identification notes)</span></label>
+                            <textarea id="obs-idtext"></textarea>
+                        </div>
+                    </div>
+
+                    <button type="submit">Add this observation</button>
+                    <button type="button" class="secondary" onclick="finishSample()">Done with this sample</button>
+                    <div id="observation-status"></div>
+                </form>
+
+                <div id="new-obs-demographics"></div>
+            </div>
+
+            <!-- ============================================= -->
+            <!-- PANEL 3: Your pending submissions               -->
+            <!-- ============================================= -->
+            <div class="panel">
+                <h2>Your submissions</h2>
+                <p class="panel-intro">
+                    Anything still <b>pending</b> can be withdrawn if you spot a mistake. Once a
+                    superuser has reviewed a record it can no longer be withdrawn this way.
+                </p>
+                <div id="my-samples-list">
+                    <p class="no-samples-message">Loading...</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // ==================================================
+        // AUTH GATE
+        // ==================================================
+        let currentUser = null;
+
+        async function checkAuth() {
+            const res = await fetch('/api/v1/auth/me');
+            const data = await res.json();
+            const authEl = document.getElementById('auth-status');
+            const gate = document.getElementById('gate');
+            const main = document.getElementById('main-content');
+
+            if (!data.logged_in) {
+                authEl.innerHTML = `<a href="/auth/login">Sign in with Google</a>`;
+                gate.style.display = 'block';
+                gate.innerHTML = `<p>You need to sign in to submit records. <a href="/auth/login">Sign in with Google</a></p>`;
+                main.style.display = 'none';
+                return;
+            }
+
+            authEl.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout">Sign out</a>`;
+
+            if (!['contributor', 'superuser', 'hyperuser'].includes(data.role)) {
+                gate.style.display = 'block';
+                gate.innerHTML = `<p>Your account is signed in, but doesn't yet have contributor access needed to submit records. Contact the site owner if you'd like to contribute data.</p>`;
+                main.style.display = 'none';
+                return;
+            }
+
+            currentUser = data;
+            gate.style.display = 'none';
+            main.style.display = 'block';
+            loadMySamples();
+        }
+
+        checkAuth();
+
+        // ==================================================
+        // SHADe BUILDER
+        // ==================================================
+        const SHADE_SUBSTRATES = {
+            S: { label: "Soil - mineral soil or sediment", subs: { s: "Sandy", c: "Clayey", z: "Silty", l: "Loamy", o: "Organic", b: "Subsoil" } },
+            O: { label: "Organic matter (excl. living/woody/dung)", subs: { f: "Fresh cut plant material (e.g. grass clippings)", d: "Decomposing plant material", h: "Humified plant material (no recognisable remains)", b: "Broadleaved leaf litter", c: "Conifer (needle) litter", n: "Nest material of animals", s: "Dried stored food products", p: "Peat" } },
+            I: { label: "Inert man-made material", subs: { p: "Plastic / rubber", m: "Metal", o: "Other" } },
+            L: { label: "Lichen", subs: { c: "Crustose lichen", n: "Non-crustose lichen" } },
+            P: { label: "Plant (non-woody, living)", subs: { l: "Leaves of living plants", r: "Roots of plant", f: "Flowers or fruit", s: "Stems or axils" } },
+            F: { label: "Fungi (non-lichenised)", subs: { f: "Fruiting bodies", m: "Fungal mycelium" } },
+            E: { label: "Exposed to air", subs: { a: "Aerial / Aeolian sample", s: "Surface of other substrate" } },
+            C: { label: "Carrion (dead animal material)", subs: { i: "Dead invertebrate", v: "Dead vertebrate (flesh)", f: "Animal fur, feathers, scales etc." } },
+            T: { label: "Timber (all woody material)", subs: { l: "Living woody tissue", u: "Unaltered dead wood (e.g. heartwood)", s: "Soft rot (brown rot) wood", w: "White rot wood", f: "Comminuted wood / invertebrate dung (frass)", b: "Bark (incl. living trees)", t: "Treated wood", c: "Charred wood / charcoal", a: "Ash" } },
+            D: { label: "Dung", subs: { c: "Carnivore dung", h: "Herbivore dung", o: "Omnivore dung", i: "Insectivore dung", m: "Manure" } },
+            A: { label: "Animals (living)", subs: { a: "Arthropods", i: "Other invertebrates (e.g. molluscs)", v: "Vertebrates" } },
+            B: { label: "Bryophytes / lower plants", subs: { m: "Mosses", l: "Liverworts", a: "Algae (excl. marine)", s: "Marine algae (seaweed)" } },
+            R: { label: "Rock", subs: { b: "Boulders / bedrock", c: "Cobbles", g: "Gravel", a: "Artificial rock-like material (concrete/brick/tile)" } },
+            W: { label: "Water", subs: { r: "Running freshwater", s: "Still freshwater", b: "Brackish", m: "Marine" } },
+        };
+
+        const SHADE_HUMIDITY = [
+            [1, "1 - Perpetually dry (only moisture from surrounding air)"],
+            [2, "2 - Wetted occasionally, dries fully within a day"],
+            [3, "3 - Occasionally wetted, dries fully within a dry week"],
+            [4, "4 - Stays moist except in unusual drought"],
+            [5, "5 - Stays moist in all conditions, including drought"],
+            [6, "6 - Occasionally waterlogged"],
+            [7, "7 - Continuously waterlogged"],
+            [0, "0 - Unknown / not estimated"],
+        ];
+
+        const SHADE_DISTURBANCE = [
+            [1, "1 - Up to 1 day ago, or constantly disturbed"],
+            [2, "2 - 1 day to 1 week ago"],
+            [3, "3 - 1 week to 1 month ago"],
+            [4, "4 - 1 month to 1 year ago"],
+            [5, "5 - 1 year to 1 decade ago"],
+            [6, "6 - 1 decade to 1 century ago"],
+            [7, "7 - A century or more ago (effectively undisturbed)"],
+            [0, "0 - Unknown / not estimated"],
+        ];
+
+        // Plant pH indicators, from the SHADe reference sheet. Used for
+        // the type-ahead lookup next to the Acidity dropdown - this is a
+        // helper only, the dropdown value is always what actually gets saved.
+        const SHADE_PLANT_PH = [
+            [4, "Cotton grasses (Eriophorum vaginatum / angustifolium)"], [4, "Crowberry"], [4, "Scots pine"],
+            [4, "Sphagnum"], [4, "Cladonia"], [4, "Sickle moss"], [4, "Cross-leaved heath"], [4, "Deer-grass"],
+            [4, "Bilberry"], [4, "Ling (heather)"], [4, "Hypnum cupressiforme"], [4, "Wavy hair-grass"],
+            [5, "Mat-grass"], [5, "Heath bedstraw"], [5, "Star sedge"], [5, "Tormentil"],
+            [5, "Heath/meadow wood-rush"], [5, "Barbed-wire moss"], [5, "Velvet bent"], [5, "Bracken"],
+            [5, "Foxglove"], [5, "Common star-moss"], [5, "Bluebell"],
+            [6, "Meadow foxtail grass"], [6, "Cuckoo-flower"], [6, "Common sorrel"], [6, "Common cat's-ear"],
+            [6, "Thyme-leaved speedwell"], [6, "Common mouse-ear"], [6, "Meadow buttercup"],
+            [6, "Creeping buttercup"], [6, "Marsh bedstraw"], [6, "Lesser stitchwort"],
+            [6, "Wavy/hairy bitter-cress"], [6, "Sticky mouse-ear"],
+            [7, "Broad-leaved dock"], [7, "Dandelion"], [7, "Curled dock"], [7, "Timothy grass"],
+            [7, "Yellow trefoil"], [7, "Common vetch"], [7, "Yellow vetchling"], [7, "Red clover"],
+            [7, "Common knapweed"], [7, "Common fleabane"], [7, "Barley"], [7, "Lop-grass"],
+            [7, "Black bent"], [7, "Creeping cinquefoil"], [7, "Tall fescue"], [7, "Oat"], [7, "Maize"],
+            [7, "Couch grass"], [7, "Cut-leaved cranesbill"], [7, "Hoary willow-herb"], [7, "Cabbage"],
+            [8, "Fat hen"], [8, "Swine-cress"], [8, "Dove's-foot cranesbill"], [8, "Scentless mayweed"],
+            [8, "Wheat"], [8, "Scented mayweed"], [8, "Field bindweed"], [8, "Field madder"],
+            [8, "Field pansy"], [8, "Prickly ox-tongue"], [8, "Common field speedwell"], [8, "Hedge mustard"],
+            [8, "Charlock"], [8, "Bryum"], [8, "Black-grass"], [8, "Potato"], [8, "Black bindweed"],
+            [8, "Common poppy"], [8, "Common orache"], [8, "Fool's parsley"], [8, "Sea beet"],
+        ];
+
+        function populateSubstrateMajor(selectEl) {
+            selectEl.innerHTML = '<option value="">-- Major substrate --</option>';
+            for (const [code, group] of Object.entries(SHADE_SUBSTRATES)) {
+                selectEl.innerHTML += `<option value="${code}">${code} - ${group.label}</option>`;
+            }
+            selectEl.innerHTML += `<option value="X">X - Unknown</option>`;
+        }
+
+        function populateSubstrateMinor(majorSelectEl, minorSelectEl) {
+            const major = majorSelectEl.value;
+            minorSelectEl.innerHTML = '<option value="">-- Subtype --</option>';
+            if (major === 'X' || !major) {
+                minorSelectEl.innerHTML += `<option value="x">x - Unknown</option>`;
+                minorSelectEl.value = 'x';
+                return;
+            }
+            const group = SHADE_SUBSTRATES[major];
+            if (!group) return;
+            for (const [subCode, subLabel] of Object.entries(group.subs)) {
+                minorSelectEl.innerHTML += `<option value="${subCode}">${subLabel}</option>`;
+            }
+        }
+
+        function populateNumberSelect(selectEl, options) {
+            selectEl.innerHTML = '<option value="">-- Select --</option>';
+            for (const [value, label] of options) {
+                selectEl.innerHTML += `<option value="${value}">${label}</option>`;
+            }
+        }
+
+        function initShadeBuilder() {
+            const sub1Major = document.getElementById('shade-sub1-major');
+            const sub1Minor = document.getElementById('shade-sub1-minor');
+            const sub2Major = document.getElementById('shade-sub2-major');
+            const sub2Minor = document.getElementById('shade-sub2-minor');
+            const sub2Toggle = document.getElementById('shade-sub2-toggle');
+            const sub2Row = document.getElementById('shade-sub2-row');
+            const humidity = document.getElementById('shade-humidity');
+            const acidity = document.getElementById('shade-acidity');
+            const disturbance = document.getElementById('shade-disturbance');
+            const acidityLookup = document.getElementById('shade-acidity-lookup');
+            const acidityResults = document.getElementById('shade-acidity-results');
+
+            populateSubstrateMajor(sub1Major);
+            populateSubstrateMajor(sub2Major);
+            populateSubstrateMinor(sub1Major, sub1Minor);
+            populateSubstrateMinor(sub2Major, sub2Minor);
+            populateNumberSelect(humidity, SHADE_HUMIDITY);
+            populateNumberSelect(disturbance, SHADE_DISTURBANCE);
+
+            acidity.innerHTML = '<option value="">-- Select --</option><option value="0">0 - Unknown</option>';
+            for (let ph = 3; ph <= 9; ph++) {
+                acidity.innerHTML += `<option value="${ph}">pH ${ph}</option>`;
+            }
+
+            [sub1Major, sub1Minor, sub2Major, sub2Minor, humidity, acidity, disturbance].forEach(el => {
+                el.addEventListener('change', updateShadePreview);
+            });
+            sub1Major.addEventListener('change', () => { populateSubstrateMinor(sub1Major, sub1Minor); updateShadePreview(); });
+            sub2Major.addEventListener('change', () => { populateSubstrateMinor(sub2Major, sub2Minor); updateShadePreview(); });
+
+            sub2Toggle.addEventListener('change', () => {
+                sub2Row.style.display = sub2Toggle.checked ? 'flex' : 'none';
+                if (!sub2Toggle.checked) {
+                    sub2Major.value = '';
+                    populateSubstrateMinor(sub2Major, sub2Minor);
+                }
+                updateShadePreview();
+            });
+
+            acidityLookup.addEventListener('input', () => {
+                const q = acidityLookup.value.trim().toLowerCase();
+                acidityResults.innerHTML = '';
+                if (q.length < 2) return;
+                const matches = SHADE_PLANT_PH.filter(([ph, name]) => name.toLowerCase().includes(q)).slice(0, 8);
+                matches.forEach(([ph, name]) => {
+                    const row = document.createElement('div');
+                    row.className = 'match-row';
+                    row.textContent = `${name} -> pH ${ph}`;
+                    row.addEventListener('click', () => {
+                        acidity.value = ph;
+                        acidityLookup.value = '';
+                        acidityResults.innerHTML = '';
+                        updateShadePreview();
+                    });
+                    acidityResults.appendChild(row);
+                });
+            });
+
+            updateShadePreview();
+        }
+
+        function getShadeCode() {
+            const sub1Major = document.getElementById('shade-sub1-major').value;
+            const sub1Minor = document.getElementById('shade-sub1-minor').value;
+            const sub2Toggle = document.getElementById('shade-sub2-toggle').checked;
+            const sub2Major = document.getElementById('shade-sub2-major').value;
+            const sub2Minor = document.getElementById('shade-sub2-minor').value;
+            const humidity = document.getElementById('shade-humidity').value;
+            const acidity = document.getElementById('shade-acidity').value;
+            const disturbance = document.getElementById('shade-disturbance').value;
+
+            if (!sub1Major || !sub1Minor || humidity === '' || acidity === '' || disturbance === '') {
+                return null; // not complete yet
+            }
+
+            const part1 = sub1Major + sub1Minor;
+            let part2;
+            if (sub2Toggle) {
+                if (!sub2Major || !sub2Minor) return null;
+                part2 = sub2Major + sub2Minor;
+            } else {
+                part2 = 'Xx';
+            }
+
+            return `${part1}${part2}-${humidity}-${acidity}-${disturbance}`;
+        }
+
+        function updateShadePreview() {
+            const code = getShadeCode();
+            const preview = document.getElementById('shade-preview');
+            preview.textContent = code || 'Complete the fields above to build the code...';
+            preview.style.color = code ? '#1b4332' : '#adb5bd';
+        }
+
+        function toggleShadeExplainer() {
+            const el = document.getElementById('shade-explainer');
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        initShadeBuilder();
+
+        // ==================================================
+        // HABITAT DROPDOWN
+        // ==================================================
+        // Built from the UK Broad Habitat classification. Locked to a
+        // dropdown (rather than free text) so future filtering/analysis
+        // isn't undermined by spelling variants of the same habitat.
+        function populateSelectWithOptions(selectEl, options, title) {
+            selectEl.innerHTML = '<option value="">-- ' + title + ' --</option>';
+            for (const option of options) {
+                selectEl.innerHTML += `<option value="${option}">${option}</option>`;
+            }
+        }
+
+        const HABITATS = [
+            "Broadleaved and Mixed Yew Woodland",
+            "Coniferous Woodland",
+            "Boundaries and Linear Features",
+            "Arable and Horticulture",
+            "Improved Grassland",
+            "Neutral Grassland",
+            "Calcareous Grassland",
+            "Acid Grassland",
+            "Bracken",
+            "Dwarf Shrub Heath",
+            "Fen, Marsh, Swamp",
+            "Bog",
+            "Rivers and Streams",
+            "Standing Open Waters, Canals and Ponds",
+            "Montane",
+            "Inland Rock",
+            "Urban",
+            "Supra-littoral Rock",
+            "Supra-littoral Sediment",
+            "Littoral Sediment",
+            "Sea",
+            "Mosaic",
+        ];
+
+        populateSelectWithOptions(document.getElementById('f-habitat'), HABITATS, "Habitat");
+
+        // ==================================================
+        // SOURCE OF RECORD PICKER
+        // ==================================================
+        const SOURCE_CATEGORIES = [
+            "Personal collection",
+            "Formal project or survey",
+            "Published literature",
+            "Museum or institutional collection",
+            "Recording event",
+            "Other",
+        ];
+        const PROJECT_CATEGORIES = ["Survey or monitoring programme", "Biological records centre bulk download"];
+
+        populateSelectWithOptions(document.getElementById('f-source-category'), SOURCE_CATEGORIES, "Select a source type");
+        populateSelectWithOptions(document.getElementById('proj-category'), PROJECT_CATEGORIES, "Select a category");
+
+        let selectedSourceLiteratureID = null;
+        let selectedSourceProjectID = null;
+
+        document.getElementById('f-source-category').addEventListener('change', (e) => {
+            const cat = e.target.value;
+            document.getElementById('source-picker').style.display = cat ? 'block' : 'none';
+            document.getElementById('source-literature-block').style.display = cat === 'Published literature' ? 'block' : 'none';
+            document.getElementById('source-project-block').style.display = cat === 'Formal project or survey' ? 'block' : 'none';
+            const otherBlock = document.getElementById('source-other-block');
+            const showOther = cat && cat !== 'Published literature' && cat !== 'Formal project or survey';
+            otherBlock.style.display = showOther ? 'block' : 'none';
+            if (showOther) {
+                document.getElementById('source-other-label').textContent =
+                    cat === 'Museum or institutional collection' ? 'Which museum/institution?' :
+                    cat === 'Recording event' ? 'Which event?' :
+                    cat === 'Other' ? 'Please specify' :
+                    'Detail (optional)';
+            }
+        });
+
+        // --- Literature fuzzy search ---
+        const litSearchBox = document.getElementById('source-lit-search');
+        const litDropdown = document.getElementById('source-lit-dropdown');
+        let litSearchTimer = null;
+        litSearchBox.addEventListener('input', () => {
+            clearTimeout(litSearchTimer);
+            selectedSourceLiteratureID = null;
+            document.getElementById('source-lit-selected').textContent = '';
+            const q = litSearchBox.value.trim();
+            if (q.length < 2) { litDropdown.classList.remove('visible'); return; }
+            litSearchTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/v1/literature/search?q=${encodeURIComponent(q)}&limit=15`);
+                    const data = await res.json();
+                    litDropdown.innerHTML = data.results.length === 0
+                        ? '<div class="source-result-row">No matches - try adding it below</div>'
+                        : data.results.map(r => `<div class="source-result-row" data-lit-id="${r.lit_id}">${r.formatted_ref}</div>`).join('');
+                    litDropdown.querySelectorAll('[data-lit-id]').forEach(row => {
+                        row.addEventListener('click', () => {
+                            selectedSourceLiteratureID = row.dataset.litId;
+                            litSearchBox.value = row.textContent;
+                            document.getElementById('source-lit-selected').textContent = `Selected reference (litID ${selectedSourceLiteratureID})`;
+                            litDropdown.classList.remove('visible');
+                        });
+                    });
+                    litDropdown.classList.add('visible');
+                } catch (err) {
+                    litDropdown.innerHTML = '<div class="source-result-row">Search failed</div>';
+                }
+            }, 300);
+        });
+
+        async function addNewLiteratureReference() {
+            const statusEl = document.getElementById('lit-add-status');
+            statusEl.innerHTML = '';
+            const payload = {
+                authorName: document.getElementById('lit-author').value || null,
+                yearPublished: document.getElementById('lit-year').value || null,
+                articleTitle: document.getElementById('lit-articletitle').value || null,
+                publicationTitle: document.getElementById('lit-pubtitle').value || null,
+                publicationVolume: document.getElementById('lit-volume').value || null,
+                publicationPages: document.getElementById('lit-pages').value || null,
+                sourceURL: document.getElementById('lit-url').value || null,
+            };
+            try {
+                const res = await fetch('/api/v1/literature', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not add reference');
+                selectedSourceLiteratureID = data.litID;
+                litSearchBox.value = `${payload.authorName || ''}, ${payload.yearPublished || ''}`.trim();
+                document.getElementById('source-lit-selected').textContent = `Selected reference (litID ${selectedSourceLiteratureID})`;
+                document.getElementById('source-lit-add-form').classList.remove('visible');
+            } catch (err) {
+                statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+            }
+        }
+
+        // --- Project fuzzy search ---
+        const projSearchBox = document.getElementById('source-proj-search');
+        const projDropdown = document.getElementById('source-proj-dropdown');
+        let projSearchTimer = null;
+        projSearchBox.addEventListener('input', () => {
+            clearTimeout(projSearchTimer);
+            selectedSourceProjectID = null;
+            document.getElementById('source-proj-selected').textContent = '';
+            const q = projSearchBox.value.trim();
+            if (q.length < 2) { projDropdown.classList.remove('visible'); return; }
+            projSearchTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/v1/projects/search?q=${encodeURIComponent(q)}&limit=15`);
+                    const data = await res.json();
+                    projDropdown.innerHTML = data.results.length === 0
+                        ? '<div class="source-result-row">No matches - try adding it below</div>'
+                        : data.results.map(r => `<div class="source-result-row" data-proj-id="${r.project_id}">${r.project_name} <span style="color:#adb5bd;font-size:0.78rem;">(${r.project_category})</span></div>`).join('');
+                    projDropdown.querySelectorAll('[data-proj-id]').forEach(row => {
+                        row.addEventListener('click', () => {
+                            selectedSourceProjectID = parseInt(row.dataset.projId, 10);
+                            projSearchBox.value = row.textContent.trim();
+                            document.getElementById('source-proj-selected').textContent = `Selected project (ID ${selectedSourceProjectID})`;
+                            projDropdown.classList.remove('visible');
+                        });
+                    });
+                    projDropdown.classList.add('visible');
+                } catch (err) {
+                    projDropdown.innerHTML = '<div class="source-result-row">Search failed</div>';
+                }
+            }, 300);
+        });
+
+        async function addNewProject() {
+            const statusEl = document.getElementById('proj-add-status');
+            statusEl.innerHTML = '';
+            const payload = {
+                project_name: document.getElementById('proj-name').value,
+                project_category: document.getElementById('proj-category').value,
+                website_url: document.getElementById('proj-website').value || null,
+                description: document.getElementById('proj-description').value || null,
+            };
+            if (!payload.project_name || !payload.project_category) {
+                statusEl.innerHTML = `<div class="status-message error">Project name and category are both required.</div>`;
+                return;
+            }
+            try {
+                const res = await fetch('/api/v1/projects', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not add project');
+                selectedSourceProjectID = data.project_id;
+                projSearchBox.value = payload.project_name;
+                document.getElementById('source-proj-selected').textContent = `Selected project (ID ${selectedSourceProjectID})`;
+                document.getElementById('source-proj-add-form').classList.remove('visible');
+            } catch (err) {
+                statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+            }
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.source-search-wrapper')) {
+                litDropdown.classList.remove('visible');
+                projDropdown.classList.remove('visible');
+            }
+        });
+
+        function resetSourcePicker() {
+            document.getElementById('f-source-category').value = '';
+            document.getElementById('source-picker').style.display = 'none';
+            document.getElementById('source-literature-block').style.display = 'none';
+            document.getElementById('source-project-block').style.display = 'none';
+            document.getElementById('source-other-block').style.display = 'none';
+            litSearchBox.value = '';
+            projSearchBox.value = '';
+            document.getElementById('source-lit-selected').textContent = '';
+            document.getElementById('source-proj-selected').textContent = '';
+            document.getElementById('source-other-detail').value = '';
+            selectedSourceLiteratureID = null;
+            selectedSourceProjectID = null;
+        }
+
+        // ==================================================
+        // SAMPLE FORM
+        // ==================================================
+        let activeEventId = null;
+
+        document.getElementById('sample-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const statusEl = document.getElementById('sample-status');
+            statusEl.innerHTML = '';
+
+            const payload = {
+                samplingLocation: document.getElementById('f-location').value || null,
+                decimalLatitude: parseFloatOrNull(document.getElementById('f-lat').value),
+                decimalLongitude: parseFloatOrNull(document.getElementById('f-lng').value),
+                coordinateUncertaintyInMeters: parseIntOrNull(document.getElementById('f-uncertainty').value),
+                earliestDateCollected: document.getElementById('f-earliest').value || null,
+                latestDateCollected: document.getElementById('f-latest').value || null,
+                habitat: document.getElementById('f-habitat').value || null,
+                microhabitat: document.getElementById('f-microhabitat').value || null,
+                SHADe: getShadeCode(),
+                samplingProtocol: document.getElementById('f-protocol').value || null,
+                recordedBy: document.getElementById('f-recordedby').value || null,
+                eventRemarks: document.getElementById('f-remarks').value || null,
+                sourceCategory: document.getElementById('f-source-category').value || null,
+                sourceLiteratureID: selectedSourceLiteratureID,
+                sourceProjectID: selectedSourceProjectID,
+                sourceOtherDetail: document.getElementById('source-other-detail').value || null,
+            };
+
+            try {
+                const res = await fetch('/api/v1/submit/sample', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not create sample');
+
+                activeEventId = data.eventID;
+                statusEl.innerHTML = `<div class="status-message success">Sample created (${data.eventID}). Now add species below.</div>`;
+                document.getElementById('active-event-id-label').textContent = activeEventId;
+                document.getElementById('add-observation-panel').style.display = 'block';
+                document.getElementById('add-observation-panel').scrollIntoView({ behavior: 'smooth' });
+                loadMySamples();
+            } catch (err) {
+                statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+            }
+        });
+
+        function parseFloatOrNull(v) { return v === '' ? null : parseFloat(v); }
+        function parseIntOrNull(v) { return v === '' ? null : parseInt(v, 10); }
+
+        function finishSample() {
+            activeEventId = null;
+            document.getElementById('add-observation-panel').style.display = 'none';
+            document.getElementById('sample-form').reset();
+            initShadeBuilder();
+            resetSourcePicker();
+            document.getElementById('sample-status').innerHTML = '';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Lets a card in "Your submissions" set this as the active sample,
+        // so the contributor can add more species to something they
+        // already started, without retyping the sample details
+        function resumeSample(eventId) {
+            activeEventId = eventId;
+            document.getElementById('active-event-id-label').textContent = eventId;
+            document.getElementById('add-observation-panel').style.display = 'block';
+            document.getElementById('add-observation-panel').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Copies a previous sample's field values into the "new sample"
+        // form as a starting point, since there's no true in-place editing
+        // yet - this at least avoids retyping everything from scratch.
+        function useAsTemplate(sample) {
+            document.getElementById('f-location').value = sample.samplingLocation || '';
+            document.getElementById('f-lat').value = sample.decimalLatitude ?? '';
+            document.getElementById('f-lng').value = sample.decimalLongitude ?? '';
+            document.getElementById('f-uncertainty').value = sample.coordinateUncertaintyInMeters ?? '';
+            document.getElementById('f-earliest').value = sample.earliestDateCollected || '';
+            document.getElementById('f-latest').value = sample.latestDateCollected || '';
+            document.getElementById('f-habitat').value = sample.habitat || '';
+            document.getElementById('f-microhabitat').value = sample.microhabitat || '';
+            document.getElementById('f-protocol').value = sample.samplingProtocol || '';
+            document.getElementById('f-recordedby').value = sample.recordedBy || '';
+            document.getElementById('f-remarks').value = sample.eventRemarks || '';
+            // SHADe is deliberately NOT copied - it's specific to the exact
+            // microhabitat of the original sample and should be re-built
+            // for the new one, not silently reused.
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            document.getElementById('sample-status').innerHTML =
+                `<div class="status-message success">Fields copied from a previous sample. Check them over, then create.</div>`;
+        }
+
+        // ==================================================
+        // OBSERVATION FORM (taxon search + submit)
+        // ==================================================
+        let selectedTaxonId = null;
+        const obsSearchBox = document.getElementById('obs-taxon-search');
+        const obsDropdown = document.getElementById('obs-taxon-dropdown');
+        let obsSearchTimer = null;
+
+        obsSearchBox.addEventListener('input', () => {
+            clearTimeout(obsSearchTimer);
+            selectedTaxonId = null;
+            document.getElementById('obs-taxon-selected').textContent = '';
+            const query = obsSearchBox.value.trim();
+            if (query.length < 3) {
+                obsDropdown.classList.remove('visible');
+                obsDropdown.innerHTML = '';
+                return;
+            }
+            obsSearchTimer = setTimeout(() => runObsTaxonSearch(query), 300);
+        });
+
+        async function runObsTaxonSearch(query) {
+            try {
+                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=25`);
+                const data = await res.json();
+                obsDropdown.innerHTML = '';
+                if (data.results.length === 0) {
+                    obsDropdown.innerHTML = '<div class="taxon-result-row">No matching taxa found</div>';
+                } else {
+                    data.results.forEach(t => {
+                        const row = document.createElement('div');
+                        row.className = 'taxon-result-row';
+                        row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank} &middot; ${t.taxonomic_status}</span>`;
+                        row.addEventListener('click', () => {
+                            selectedTaxonId = t.taxon_id;
+                            obsSearchBox.value = t.scientific_name;
+                            document.getElementById('obs-taxon-selected').textContent = `Selected: ${t.scientific_name} (taxonID ${t.taxon_id})`;
+                            obsDropdown.classList.remove('visible');
+                        });
+                        obsDropdown.appendChild(row);
+                    });
+                }
+                obsDropdown.classList.add('visible');
+            } catch (err) {
+                obsDropdown.innerHTML = '<div class="taxon-result-row">Search failed</div>';
+            }
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!document.querySelector('.taxon-search-wrapper').contains(e.target)) {
+                obsDropdown.classList.remove('visible');
+            }
+        });
+
+        document.getElementById('observation-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const statusEl = document.getElementById('observation-status');
+            statusEl.innerHTML = '';
+
+            if (!activeEventId) {
+                statusEl.innerHTML = `<div class="status-message error">No active sample - create or resume one first.</div>`;
+                return;
+            }
+            if (!selectedTaxonId) {
+                statusEl.innerHTML = `<div class="status-message error">Pick a species from the dropdown before adding.</div>`;
+                return;
+            }
+
+            const payload = {
+                eventID: activeEventId,
+                taxonID: selectedTaxonId,
+                identifiedBy: document.getElementById('obs-identifiedby').value || null,
+                identificationVerificationStatus: document.getElementById('obs-verification').value || null,
+                basisOfRecord: document.getElementById('obs-basis').value || null,
+                idTechnique: document.getElementById('obs-technique').value || null,
+                idText: document.getElementById('obs-idtext').value || null,
+            };
+
+            try {
+                const res = await fetch('/api/v1/submit/observation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not add observation');
+
+                statusEl.innerHTML = `<div class="status-message success">Added. You can add another, or select "Done with this sample".</div>`;
+                const addedTaxonName = obsSearchBox.value || 'this species';
+                document.getElementById('observation-form').reset();
+                selectedTaxonId = null;
+                document.getElementById('obs-taxon-selected').textContent = '';
+
+                renderObservationDemographics(
+                    document.getElementById('new-obs-demographics'),
+                    data.observationID,
+                    addedTaxonName,
+                    []
+                );
+
+                loadMySamples();
+            } catch (err) {
+                statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+            }
+        });
+
+        // ==================================================
+        // DEMOGRAPHICS & SPECIMENS BUILDER
+        // ==================================================
+        // A demographic group is "N individuals of a given sex/lifestage"
+        // within one observation - an observation can have several (e.g.
+        // "3 male nymphs" AND "1 female adult" from the same specimen
+        // find). A demographic group can, in turn, contain one or more
+        // individually-catalogued specimen records. This same component
+        // is used in two places: right after adding a new observation
+        // (with an empty starting list), and in the "Your submissions"
+        // tree for adding to something already submitted - including
+        // already-verified samples, since demographic/specimen detail
+        // can legitimately be added to a collection over time as more
+        // of it gets identified or catalogued.
+
+        const SHADE_SEX_OPTIONS = ["male", "female", "undetermined", "mixed"];
+        const SHADE_LIFESTAGE_OPTIONS = [
+            "egg", "prolarva", "larva", "protonymph", "deutonymph", "tritonymph",
+            "nymph", "juvenile", "adult", "dead remains", "undetermined", "sign", "gall"
+        ];
+
+        function renderObservationDemographics(containerEl, observationId, taxonLabel, existingDemographics) {
+            containerEl.innerHTML = '';
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'demo-container';
+
+            const existingList = document.createElement('div');
+            (existingDemographics || []).forEach(demo => existingList.appendChild(renderDemoGroupCard(demo)));
+            wrapper.appendChild(existingList);
+
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'toggle-add-link';
+            toggleBtn.textContent = `+ Add demographic detail for ${taxonLabel}`;
+            wrapper.appendChild(toggleBtn);
+
+            const form = buildDemoAddForm(observationId, (newDemo) => {
+                existingList.appendChild(renderDemoGroupCard(newDemo));
+                form.classList.remove('visible');
+            });
+            wrapper.appendChild(form);
+
+            toggleBtn.addEventListener('click', () => form.classList.toggle('visible'));
+
+            containerEl.appendChild(wrapper);
+        }
+
+        function buildDemoAddForm(observationId, onAdded) {
+            const form = document.createElement('div');
+            form.className = 'demo-add-form';
+            form.innerHTML = `
+                <div class="field-row">
+                    <div class="field">
+                        <label>Sex</label>
+                        <select class="demo-sex"></select>
+                    </div>
+                    <div class="field">
+                        <label>Lifestage</label>
+                        <select class="demo-lifestage"></select>
+                    </div>
+                    <div class="field">
+                        <label>Count</label>
+                        <input type="number" class="demo-count" min="0" placeholder="e.g. 1">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Min count <span class="hint">(if a range)</span></label>
+                        <input type="number" class="demo-mincount" min="0">
+                    </div>
+                    <div class="field">
+                        <label>Max count <span class="hint">(if a range)</span></label>
+                        <input type="number" class="demo-maxcount" min="0">
+                    </div>
+                    <div class="field">
+                        <label>Density <span class="hint">(optional)</span></label>
+                        <input type="number" step="any" class="demo-density" placeholder="e.g. 2">
+                    </div>
+                    <div class="field">
+                        <label>Density unit</label>
+                        <input type="text" class="demo-densityunit" placeholder="e.g. per 100cm2">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field full">
+                        <label>Abundance description <span class="hint">(optional, e.g. "very numerous")</span></label>
+                        <input type="text" class="demo-countdesc">
+                    </div>
+                </div>
+                <button type="button" class="small demo-add-btn">Add this demographic group</button>
+                <div class="demo-status"></div>
+            `;
+            populateSelectWithOptions(form.querySelector('.demo-sex'), SHADE_SEX_OPTIONS, 'Sex');
+            populateSelectWithOptions(form.querySelector('.demo-lifestage'), SHADE_LIFESTAGE_OPTIONS, 'Lifestage');
+
+            form.querySelector('.demo-add-btn').addEventListener('click', async () => {
+                const statusEl = form.querySelector('.demo-status');
+                statusEl.innerHTML = '';
+                const payload = {
+                    observationID: observationId,
+                    sex: form.querySelector('.demo-sex').value || null,
+                    lifestage: form.querySelector('.demo-lifestage').value || null,
+                    count: form.querySelector('.demo-count').value || null,
+                    minCount: form.querySelector('.demo-mincount').value || null,
+                    maxCount: form.querySelector('.demo-maxcount').value || null,
+                    density: form.querySelector('.demo-density').value || null,
+                    densityUnit: form.querySelector('.demo-densityunit').value || null,
+                    countDescription: form.querySelector('.demo-countdesc').value || null,
+                };
+                try {
+                    const res = await fetch('/api/v1/submit/demographic', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Could not add demographic group');
+                    onAdded({ ...payload, demographicID: data.demographicID, specimens: [] });
+                } catch (err) {
+                    statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+                }
+            });
+
+            return form;
+        }
+
+        function renderDemoGroupCard(demo) {
+            const card = document.createElement('div');
+            card.className = 'demo-group-card';
+
+            const summaryBits = [demo.sex, demo.lifestage, demo.count ? `count: ${demo.count}` : null].filter(Boolean);
+            const summary = document.createElement('div');
+            summary.className = 'demo-group-summary';
+            summary.textContent = summaryBits.length ? summaryBits.join(' / ') : 'Demographic group';
+            card.appendChild(summary);
+
+            if (demo.densityUnit || demo.countDescription) {
+                const detail = document.createElement('div');
+                detail.className = 'demo-group-detail';
+                detail.textContent = [
+                    demo.density ? `${demo.density} ${demo.densityUnit || ''}`.trim() : null,
+                    demo.countDescription
+                ].filter(Boolean).join(' \u00b7 ');
+                card.appendChild(detail);
+            }
+
+            const specContainer = document.createElement('div');
+            specContainer.className = 'spec-container';
+            (demo.specimens || []).forEach(spec => specContainer.appendChild(renderSpecimenCard(spec)));
+            card.appendChild(specContainer);
+
+            const specToggle = document.createElement('button');
+            specToggle.type = 'button';
+            specToggle.className = 'toggle-add-link';
+            specToggle.textContent = '+ Add a specimen record';
+            card.appendChild(specToggle);
+
+            const specForm = buildSpecimenAddForm(demo.demographicID, (newSpec) => {
+                specContainer.appendChild(renderSpecimenCard(newSpec));
+                specForm.classList.remove('visible');
+            });
+            card.appendChild(specForm);
+
+            specToggle.addEventListener('click', () => specForm.classList.toggle('visible'));
+
+            return card;
+        }
+
+        function buildSpecimenAddForm(demographicId, onAdded) {
+            const form = document.createElement('div');
+            form.className = 'demo-add-form';
+            form.innerHTML = `
+                <div class="field-row">
+                    <div class="field">
+                        <label>Specimen count <span class="hint">(usually 1)</span></label>
+                        <input type="number" class="spec-count" min="0" value="1">
+                    </div>
+                    <div class="field">
+                        <label>Preservation</label>
+                        <input type="text" class="spec-preservation" placeholder="e.g. In ethanol, slide mount">
+                    </div>
+                    <div class="field">
+                        <label>Type <span class="hint">(if a type specimen)</span></label>
+                        <select class="spec-type"></select>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label>Held at</label>
+                        <input type="text" class="spec-location" placeholder="e.g. NHM London">
+                    </div>
+                    <div class="field">
+                        <label>Reference / accession number</label>
+                        <input type="text" class="spec-ref">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field full">
+                        <label>Comments</label>
+                        <input type="text" class="spec-comments">
+                    </div>
+                </div>
+                <button type="button" class="small spec-add-btn">Add this specimen</button>
+                <div class="spec-status"></div>
+            `;
+            populateSelectWithOptions(
+                form.querySelector('.spec-type'),
+                ["Holotype", "Paratype", "Allotype", "Lectotype", "Syntype", "Neotype", "Not a type specimen"],
+                "Type"
+            );
+
+            form.querySelector('.spec-add-btn').addEventListener('click', async () => {
+                const statusEl = form.querySelector('.spec-status');
+                statusEl.innerHTML = '';
+                const payload = {
+                    demographicID: demographicId,
+                    specCount: form.querySelector('.spec-count').value || null,
+                    specPreservation: form.querySelector('.spec-preservation').value || null,
+                    specType: form.querySelector('.spec-type').value || null,
+                    specLocation: form.querySelector('.spec-location').value || null,
+                    specRef: form.querySelector('.spec-ref').value || null,
+                    specComments: form.querySelector('.spec-comments').value || null,
+                };
+                try {
+                    const res = await fetch('/api/v1/submit/specimen', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Could not add specimen');
+                    onAdded({ ...payload, specimenID: data.specimenID });
+                } catch (err) {
+                    statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
+                }
+            });
+
+            return form;
+        }
+
+        function renderSpecimenCard(spec) {
+            const card = document.createElement('div');
+            card.className = 'spec-card';
+            const bits = [
+                spec.specimenID,
+                spec.specPreservation,
+                spec.specLocation ? `held at ${spec.specLocation}` : null,
+                spec.specRef,
+                spec.specType && spec.specType !== 'Not a type specimen' ? spec.specType : null,
+            ].filter(Boolean);
+            card.textContent = bits.join(' \u00b7 ');
+            return card;
+        }
+
+        // ==================================================
+        // YOUR SUBMISSIONS LIST
+        // ==================================================
+        async function loadMySamples() {
+            const listEl = document.getElementById('my-samples-list');
+            try {
+                const res = await fetch('/api/v1/submit/my-samples');
+                const data = await res.json();
+
+                if (!data.samples || data.samples.length === 0) {
+                    listEl.innerHTML = '<p class="no-samples-message">You haven\'t submitted anything yet.</p>';
+                    return;
+                }
+
+                listEl.innerHTML = '';
+                data.samples.forEach(sample => {
+                    const card = document.createElement('div');
+                    card.className = 'sample-card';
+
+                    const pendingObs = sample.observations.filter(o => o.verification_status === 'pending');
+                    const allPending = sample.observations.length === 0 || sample.observations.every(o => o.verification_status === 'pending');
+
+                    let obsHtml = '';
+                    if (sample.observations.length === 0) {
+                        obsHtml = '<p class="no-samples-message" style="margin: 6px 0;">No species added to this sample yet.</p>';
+                    } else {
+                        sample.observations.forEach(o => {
+                            obsHtml += `
+                                <div class="obs-row">
+                                    <span><span class="sci-name">${o.scientificName}</span></span>
+                                    <span>
+                                        <span class="status-tag">${o.verification_status}</span>
+                                        ${o.verification_status === 'pending' ? `<button class="small danger" style="margin-left:8px;" onclick="withdrawObservation('${o.observationID}')">Withdraw</button>` : ''}
+                                    </span>
+                                </div>
+                                <div id="demo-container-${o.observationID}"></div>`;
+                        });
+                    }
+
+                    card.innerHTML = `
+                        <div class="sample-card-header">
+                            <span class="sample-title">${sample.samplingLocation || 'Unnamed location'}</span>
+                            <span class="event-id">${sample.eventID}</span>
+                        </div>
+                        <div class="sample-card-meta">
+                            ${sample.earliestDateCollected || 'Date unrecorded'} &middot;
+                            ${sample.habitat || 'Habitat unrecorded'} &middot;
+                            ${sample.observations.length} observation(s)
+                        </div>
+                        <div id="obs-list-${sample.eventID}">${obsHtml}</div>
+                        <div class="card-actions">
+                            <button class="small secondary" onclick='resumeSample("${sample.eventID}")'>Add another observation</button>
+                            <button class="small secondary" onclick='useAsTemplate(${JSON.stringify(sample).replace(/'/g, "&apos;")})'>Use as template for new sample</button>
+                            ${allPending ? `<button class="small danger" onclick="withdrawSample('${sample.eventID}')">Withdraw whole sample</button>` : ''}
+                        </div>
+                    `;
+                    listEl.appendChild(card);
+
+                    // Demographics builders need to run AFTER the card's
+                    // HTML is actually in the DOM, since they look up
+                    // their container div by ID
+                    sample.observations.forEach(o => {
+                        const demoContainer = document.getElementById(`demo-container-${o.observationID}`);
+                        if (demoContainer) {
+                            renderObservationDemographics(demoContainer, o.observationID, o.scientificName, o.demographics || []);
+                        }
+                    });
+                });
+            } catch (err) {
+                listEl.innerHTML = '<p class="no-samples-message">Could not load your submissions.</p>';
+            }
+        }
+
+        async function withdrawObservation(observationId) {
+            if (!confirm('Withdraw this observation? This cannot be undone.')) return;
+            try {
+                const res = await fetch(`/api/v1/submit/observation/${encodeURIComponent(observationId)}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not withdraw');
+                loadMySamples();
+            } catch (err) {
+                alert(err.message);
+            }
+        }
+
+        async function withdrawSample(eventId) {
+            if (!confirm('Withdraw this whole sample, including any observations in it? This cannot be undone.')) return;
+            try {
+                const res = await fetch(`/api/v1/submit/sample/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Could not withdraw');
+                if (activeEventId === eventId) finishSample();
+                loadMySamples();
+            } catch (err) {
+                alert(err.message);
+            }
+        }
+    </script>
+</body>
+</html>
