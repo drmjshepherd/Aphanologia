@@ -703,3 +703,23 @@ A review page and table was set up to allow review of submitted records by a sup
 While "observations" already has verification_status/verified_by/verified_date/verification_notes, but these are a single snapshot so each new review action overwrites the last, so there's no record of HOW a record reached its current state, who was involved along the way, or why an earlier decision was changed. Given the emphasis on being able to show your reasoning for taxonomic and verification decisions transparently (to the recording community, to Chris Raper/NBN, to anyone questioning a call later), this needs to be a proper append-only log: one row per review action, never overwritten or deleted.
 
 This also directly supports the planned contributor notification bell (a contributor should be told when one of their records is reviewed) via the viewed_by_contributor flag - not built yet, but the data this needs already exists here rather than being bolted on awkwardly later.
+
+## Additions and tweaks
+
+What's here:
+
+Source-of-record picker, above sampling location on the sample form. Six categories; picking "Published literature" or "Formal project or survey" reveals a fuzzy-search box against the real tables, with an "add new" fallback if it's not catalogued yet. Everything else gets a plain detail field. The old dataSource[free text] column still gets a sensible human-readable summary written to it automatically, so it stays useful to skim even though the real link now lives in sample_literature_junction / the new sample_project_junction.
+Fuzzy search everywhere it matters — taxonomy browser, submission form's species picker, review screen's reassign picker, and now the map page too. All backed by PostgreSQL's pg_trgm, not a client-side library, so it scales properly as your taxonomy grows.
+Nothrus vs. Ameronothrus is fixed — ranking now boosts exact-prefix matches to the top before falling back to similarity score, so the genus itself surfaces first rather than being buried under 15 unrelated genus names that happen to contain the string.
+Map page got the autocomplete it never had — previously it only did free-text substring matching against observation records directly. Now typing brings up the same taxon dropdown as everywhere else; picking a result sets the map to that specific taxon (via taxon_id, descendant-aware) and refreshes immediately. If you type without picking anything, it still falls back to the old free-text behaviour, so nothing's lost.
+Dropdown height bumped from ~220–320px to ~400–440px across all four pages, so more results are visible before scrolling.
+
+One judgment call worth flagging: I made sample_project_junction require a project category (survey/monitoring vs. records-centre bulk download) at creation time, since you specifically wanted records-centre downloads distinguishable as a subtype rather than lost as a generic "project." Worth checking that split feels right once you've added a couple of real entries — ERCCIS as records-centre, England Ecosystem Survey as survey/monitoring, that kind of thing.
+
+Good one to test end-to-end: create a sample, pick "Published literature," search for something that doesn't exist yet, add it fresh, confirm it links — then create another sample citing ERCCIS as a project the same way.
+
+This was achived using updates to main.py, index.html, submit.html, taxonomy.html, and review.html
+
+[Migration-13fuzzy_search_and_source-of-record_structure.sql](Migration-13fuzzy_search_and_source-of-record_structure.sql)
+
+
