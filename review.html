@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia - Review Submissions</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; color: #212529; }
+        #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        #header h1 { margin: 0; font-size: 1.2rem; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
+        #auth-status a { color: white; }
+
+        #page { max-width: 900px; margin: 0 auto; padding: 24px 20px 80px; }
+        .gate-message { text-align: center; padding: 60px 20px; color: #495057; }
+        .queue-summary { font-size: 0.9rem; color: #495057; margin-bottom: 18px; }
+
+        .field-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+        .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+        .field.full { flex-basis: 100%; }
+        .field label { font-weight: 600; font-size: 0.78rem; color: #2d6a4f; }
+        .field input, .field select, .field textarea {
+            padding: 7px 9px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.87rem; font-family: inherit;
+        }
+        .field textarea { resize: vertical; min-height: 44px; }
+
+        button {
+            background: #2d6a4f; color: white; border: none; padding: 8px 14px; border-radius: 4px;
+            cursor: pointer; font-weight: bold; font-size: 0.85rem;
+        }
+        button:hover { background: #1b4332; }
+        button.small { padding: 5px 10px; font-size: 0.78rem; }
+        button.accept { background: #2d6a4f; }
+        button.reject { background: none; border: 1px solid #c1666b; color: #c1666b; }
+        button.reject:hover { background: #fbebec; }
+        button.query { background: none; border: 1px solid #b08d1f; color: #b08d1f; }
+        button.query:hover { background: #fdf6e3; }
+        button.reassign { background: none; border: 1px solid #2d6a4f; color: #2d6a4f; }
+        button.reassign:hover { background: #e9f5ee; }
+
+        .sample-card { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px 18px; margin-bottom: 18px; }
+        .sample-card-header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+        .sample-card-header .sample-title { font-weight: 600; color: #1b4332; }
+        .sample-card-header .event-id { font-family: 'Consolas', monospace; font-size: 0.78rem; color: #868e96; }
+        .sample-meta { font-size: 0.8rem; color: #6c757d; margin: 4px 0 4px; }
+        .submitter-line { font-size: 0.8rem; color: #495057; margin-bottom: 12px; }
+        .submitter-line b { color: #1b4332; }
+
+        .obs-block { border-top: 1px solid #f1f3f5; padding-top: 12px; margin-top: 12px; }
+        .obs-block:first-of-type { border-top: none; margin-top: 0; }
+        .obs-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+        .obs-heading .sci-name { font-style: italic; font-weight: 600; color: #1b4332; font-size: 1rem; }
+        .obs-heading .obs-id { font-family: 'Consolas', monospace; font-size: 0.75rem; color: #adb5bd; }
+        .status-tag { font-size: 0.7rem; padding: 2px 8px; border-radius: 8px; color: white; }
+        .status-tag.pending { background: #e8a33d; }
+        .status-tag.verified { background: #2d6a4f; }
+        .status-tag.rejected { background: #c1666b; }
+        .status-tag.queried { background: #b08d1f; }
+
+        .obs-detail-line { font-size: 0.82rem; color: #6c757d; margin: 3px 0; }
+        .demo-summary { font-size: 0.8rem; color: #495057; background: #f8f9fa; border-radius: 4px; padding: 5px 9px; margin: 3px 0; }
+        .spec-summary { font-size: 0.76rem; color: #6c757d; padding: 2px 0 2px 16px; }
+
+        .action-bar { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .review-form { display: none; margin-top: 10px; border: 1px dashed #ced4da; border-radius: 6px; padding: 12px; }
+        .review-form.visible { display: block; }
+        .review-status { margin-top: 6px; font-size: 0.82rem; }
+        .review-status.error { color: #842029; }
+        .review-status.success { color: #1b4332; font-weight: 600; }
+
+        .taxon-search-wrapper { position: relative; }
+        .taxon-dropdown {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 220px; overflow-y: auto;
+            z-index: 50; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .taxon-dropdown.visible { display: block; }
+        .taxon-result-row { padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.85rem; }
+        .taxon-result-row:hover { background: #e9ecef; }
+        .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
+        .taxon-result-row .rank-tag { font-size: 0.7rem; color: #868e96; margin-left: 6px; }
+
+        .empty-queue { text-align: center; padding: 50px 20px; color: #adb5bd; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <a class="title-link" href="/"><h1>Aphanologia: Review Submissions</h1></a>
+        <a class="nav-link" href="/map">Map</a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/submit">Submit</a>
+        <a class="nav-link" href="/schema">Schema Viewer</a>
+        <div id="auth-status"></div>
+    </div>
+
+    <div id="page">
+        <div id="gate" class="gate-message" style="display: none;"></div>
+        <div id="main-content" style="display: none;">
+            <p class="queue-summary" id="queue-summary"></p>
+            <div id="queue-list"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+
+        async function checkAuthAndLoad() {
+            const res = await fetch('/api/v1/auth/me');
+            const data = await res.json();
+            const authEl = document.getElementById('auth-status');
+            const gate = document.getElementById('gate');
+            const main = document.getElementById('main-content');
+
+            if (!data.logged_in) {
+                authEl.innerHTML = `<a href="/auth/login">Sign in with Google</a>`;
+                gate.style.display = 'block';
+                gate.innerHTML = `<p>You need to sign in to view this. <a href="/auth/login">Sign in with Google</a></p>`;
+                return;
+            }
+            authEl.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout">Sign out</a>`;
+
+            if (!['superuser', 'hyperuser'].includes(data.role)) {
+                gate.style.display = 'block';
+                gate.innerHTML = `<p>This tool is restricted to superusers.</p>`;
+                return;
+            }
+
+            currentUser = data;
+            main.style.display = 'block';
+            loadQueue();
+        }
+
+        async function loadQueue() {
+            const listEl = document.getElementById('queue-list');
+            const summaryEl = document.getElementById('queue-summary');
+            try {
+                const res = await fetch('/api/v1/admin/review-queue');
+                const data = await res.json();
+
+                if (!data.samples || data.samples.length === 0) {
+                    summaryEl.textContent = '';
+                    listEl.innerHTML = '<p class="empty-queue">Nothing waiting for review right now.</p>';
+                    return;
+                }
+
+                const pendingCount = data.samples.reduce((sum, s) =>
+                    sum + s.observations.filter(o => o.verification_status === 'pending').length, 0);
+                summaryEl.textContent = `${pendingCount} observation(s) awaiting review, across ${data.samples.length} sample(s).`;
+
+                listEl.innerHTML = '';
+                data.samples.forEach(sample => listEl.appendChild(renderSampleCard(sample)));
+            } catch (err) {
+                listEl.innerHTML = '<p class="empty-queue">Could not load the review queue.</p>';
+            }
+        }
+
+        function renderSampleCard(sample) {
+            const card = document.createElement('div');
+            card.className = 'sample-card';
+
+            const header = document.createElement('div');
+            header.innerHTML = `
+                <div class="sample-card-header">
+                    <span class="sample-title">${sample.samplingLocation || 'Unnamed location'}</span>
+                    <span class="event-id">${sample.eventID}</span>
+                </div>
+                <div class="sample-meta">
+                    ${sample.earliestDateCollected || 'Date unrecorded'} &middot;
+                    ${sample.habitat || 'Habitat unrecorded'}${sample.SHADe ? ' &middot; SHADe: ' + sample.SHADe : ''}
+                </div>
+                <div class="submitter-line">Submitted by <b>${sample.submitted_by_name || 'unknown'}</b> (${sample.submitted_by_email || 'no email on file'})</div>
+            `;
+            card.appendChild(header);
+
+            sample.observations.forEach(obs => card.appendChild(renderObservationBlock(obs)));
+            return card;
+        }
+
+        function renderObservationBlock(obs) {
+            const block = document.createElement('div');
+            block.className = 'obs-block';
+
+            const demoSummary = (obs.demographics || []).map(d => {
+                const bits = [d.sex, d.lifestage, d.count ? `count: ${d.count}` : null].filter(Boolean).join(' / ');
+                const specBits = (d.specimens || []).map(s =>
+                    `<div class="spec-summary">${[s.specimenID, s.specPreservation, s.specLocation].filter(Boolean).join(' &middot; ')}</div>`
+                ).join('');
+                return `<div class="demo-summary">${bits || 'Demographic group'}</div>${specBits}`;
+            }).join('');
+
+            block.innerHTML = `
+                <div class="obs-heading">
+                    <span><span class="sci-name">${obs.scientificName}</span> <span class="obs-id">${obs.observationID}</span></span>
+                    <span class="status-tag ${obs.verification_status}">${obs.verification_status}</span>
+                </div>
+                ${obs.identifiedBy ? `<div class="obs-detail-line">Identified by: ${obs.identifiedBy}</div>` : ''}
+                ${obs.basisOfRecord ? `<div class="obs-detail-line">Basis of record: ${obs.basisOfRecord}</div>` : ''}
+                ${obs.idText ? `<div class="obs-detail-line">Notes: ${obs.idText}</div>` : ''}
+                ${demoSummary}
+            `;
+
+            if (obs.verification_status === 'pending') {
+                block.appendChild(renderActionBar(obs));
+            }
+
+            return block;
+        }
+
+        function renderActionBar(obs) {
+            const wrap = document.createElement('div');
+
+            const bar = document.createElement('div');
+            bar.className = 'action-bar';
+            bar.innerHTML = `
+                <button class="small accept" data-action="accepted">Accept</button>
+                <button class="small reject" data-action="rejected">Reject</button>
+                <button class="small query" data-action="queried">Query</button>
+                <button class="small reassign" data-action="reassigned">Reassign</button>
+            `;
+            wrap.appendChild(bar);
+
+            const form = document.createElement('div');
+            form.className = 'review-form';
+            form.innerHTML = `
+                <div class="field-row" id="reassign-taxon-row-${obs.observationID}" style="display:none;">
+                    <div class="field full taxon-search-wrapper">
+                        <label>Reassign to</label>
+                        <input type="text" class="reassign-taxon-search" placeholder="Start typing a scientific name...">
+                        <div class="taxon-dropdown"></div>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field full">
+                        <label>Notes <span style="font-weight:400;color:#adb5bd;">(recommended for reject/reassign)</span></label>
+                        <textarea class="review-notes"></textarea>
+                    </div>
+                </div>
+                <button class="small confirm-btn" type="button">Confirm</button>
+                <div class="review-status"></div>
+            `;
+            wrap.appendChild(form);
+
+            let chosenAction = null;
+            let chosenReassignTaxonId = null;
+
+            bar.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    chosenAction = btn.dataset.action;
+                    form.classList.add('visible');
+                    form.querySelector(`#reassign-taxon-row-${obs.observationID}`).style.display =
+                        chosenAction === 'reassigned' ? 'flex' : 'none';
+                    form.querySelector('.review-status').innerHTML = '';
+                });
+            });
+
+            const searchBox = form.querySelector('.reassign-taxon-search');
+            const dropdown = form.querySelector('.taxon-dropdown');
+            let searchTimer = null;
+            searchBox.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                chosenReassignTaxonId = null;
+                const q = searchBox.value.trim();
+                if (q.length < 3) { dropdown.classList.remove('visible'); return; }
+                searchTimer = setTimeout(async () => {
+                    const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(q)}&limit=15`);
+                    const data = await res.json();
+                    dropdown.innerHTML = '';
+                    data.results.forEach(t => {
+                        const row = document.createElement('div');
+                        row.className = 'taxon-result-row';
+                        row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank}</span>`;
+                        row.addEventListener('click', () => {
+                            chosenReassignTaxonId = t.taxon_id;
+                            searchBox.value = t.scientific_name;
+                            dropdown.classList.remove('visible');
+                        });
+                        dropdown.appendChild(row);
+                    });
+                    dropdown.classList.add('visible');
+                }, 300);
+            });
+
+            form.querySelector('.confirm-btn').addEventListener('click', async () => {
+                const statusEl = form.querySelector('.review-status');
+                statusEl.className = 'review-status';
+                statusEl.textContent = '';
+
+                if (chosenAction === 'reassigned' && !chosenReassignTaxonId) {
+                    statusEl.className = 'review-status error';
+                    statusEl.textContent = 'Pick a taxon from the dropdown to reassign to.';
+                    return;
+                }
+
+                const payload = {
+                    action_type: chosenAction,
+                    notes: form.querySelector('.review-notes').value || null,
+                    reassigned_taxon_id: chosenReassignTaxonId,
+                };
+
+                try {
+                    const res = await fetch(`/api/v1/admin/verify/${encodeURIComponent(obs.observationID)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Could not record decision');
+                    statusEl.className = 'review-status success';
+                    statusEl.textContent = 'Recorded.';
+                    setTimeout(loadQueue, 600);
+                } catch (err) {
+                    statusEl.className = 'review-status error';
+                    statusEl.textContent = err.message;
+                }
+            });
+
+            return wrap;
+        }
+
+        checkAuthAndLoad();
+    </script>
+</body>
+</html>
