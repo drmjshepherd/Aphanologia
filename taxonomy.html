@@ -30,7 +30,7 @@
             color: #212529;
             border: 1px solid #ced4da;
             border-top: none;
-            max-height: 320px;
+            max-height: 440px;
             overflow-y: auto;
             z-index: 1000;
             display: none;
@@ -123,6 +123,16 @@
         #photo-gallery .more-photos-btn { margin-top: 8px; background: none; border: 1px solid #2d6a4f; color: #2d6a4f; padding: 6px 12px; font-size: 0.85rem; font-weight: normal; }
         #photo-gallery .more-photos-btn:hover { background: #2d6a4f; color: white; }
         #photo-gallery .no-photos { color: #adb5bd; font-style: italic; font-size: 0.85rem; }
+
+        #literature-section { margin-top: 25px; border-top: 1px solid #dee2e6; padding-top: 15px; }
+        #literature-section .lit-heading { font-weight: 600; font-size: 0.8rem; color: #2d6a4f; text-transform: uppercase; margin-bottom: 12px; }
+        .lit-category { margin-bottom: 14px; }
+        .lit-category-title { font-weight: 600; font-size: 0.85rem; color: #1b4332; margin-bottom: 4px; }
+        .lit-list { margin: 0; padding-left: 18px; font-size: 0.88rem; color: #333; }
+        .lit-list li { margin-bottom: 6px; line-height: 1.35; }
+        .lit-link { color: #1b4332; text-decoration: underline; }
+        .lit-link:hover { color: #2d6a4f; }
+        .no-lit { color: #adb5bd; font-style: italic; font-size: 0.85rem; }
 
         #view-on-map-btn {
             display: inline-block;
@@ -369,9 +379,11 @@
                     </div>` : ''}
                     <a id="view-on-map-btn" href="/map?taxon_id=${t.taxonID}">View records on map</a>
                     <div id="photo-gallery"><span class="loading-text">Loading photos...</span></div>
+                    <div id="literature-section"><span class="loading-text">Loading literature...</span></div>
                 `;
 
                 loadPhotoGallery(t.taxonID);
+                loadLiterature(t.taxonID);
             } catch (err) {
                 panel.innerHTML = '<p class="placeholder">Could not load details for this taxon.</p>';
             }
@@ -406,6 +418,41 @@
                 `;
             } catch (err) {
                 gallery.innerHTML = '<div class="gallery-heading">Photos</div><p class="no-photos">Could not load photos.</p>';
+            }
+        }
+
+        async function loadLiterature(taxonId) {
+            const section = document.getElementById('literature-section');
+            if (!section) return;
+
+            try {
+                const res = await fetch(`/api/v1/taxonomy/literature/${taxonId}`);
+                const data = await res.json();
+                const grouped = data.literature || {};
+
+                const categoriesWithEntries = Object.entries(grouped).filter(([, entries]) => entries.length > 0);
+
+                if (categoriesWithEntries.length === 0) {
+                    section.innerHTML = '<div class="lit-heading">Literature</div><p class="no-lit">No linked references for this taxon yet.</p>';
+                    return;
+                }
+
+                section.innerHTML = '<div class="lit-heading">Literature</div>' +
+                    categoriesWithEntries.map(([category, entries]) => `
+                        <div class="lit-category">
+                            <div class="lit-category-title">${category}</div>
+                            <ul class="lit-list">
+                                ${entries.map(entry => `
+                                    <li>${entry.url
+                                        ? `<a class="lit-link" href="${entry.url}" target="_blank" rel="noopener">${entry.formatted_ref}</a>`
+                                        : entry.formatted_ref
+                                    }</li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    `).join('');
+            } catch (err) {
+                section.innerHTML = '<div class="lit-heading">Literature</div><p class="no-lit">Could not load literature.</p>';
             }
         }
 
@@ -484,7 +531,7 @@
 
         async function runSearch(query) {
             try {
-                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=15`);
+                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=25`);
                 const data = await res.json();
                 dropdown.innerHTML = '';
 
