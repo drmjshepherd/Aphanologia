@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia - Batch Upload</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; color: #212529; }
+        #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        #header h1 { margin: 0; font-size: 1.2rem; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #header a.nav-link:hover { text-decoration: underline; }
+        #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
+        #auth-status a { color: white; }
+
+        #page { max-width: 850px; margin: 0 auto; padding: 24px 20px 80px; }
+        .gate-message { text-align: center; padding: 60px 20px; color: #495057; }
+        h2 { color: #1b4332; font-size: 1.1rem; margin: 0 0 4px; }
+        .subtext { color: #6c757d; font-size: 0.85rem; margin: 0 0 16px; }
+        .panel { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 18px 20px; margin-bottom: 20px; }
+        .panel.disabled { opacity: 0.5; pointer-events: none; }
+        .step-number { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #2d6a4f; color: white; font-size: 0.8rem; font-weight: bold; margin-right: 8px; }
+
+        .field-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+        .field { display: flex; flex-direction: column; gap: 4px; }
+        .field.checkbox-field { flex-direction: row; align-items: center; gap: 8px; }
+        .field.checkbox-field input[type=checkbox] { width: auto; }
+        .field label { font-weight: 600; font-size: 0.85rem; color: #212529; }
+        .field .hint { font-weight: normal; color: #868e96; font-size: 0.78rem; }
+
+        button { background: #2d6a4f; color: white; border: none; padding: 10px 18px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.9rem; }
+        button:hover { background: #1b4332; }
+        button:disabled { background: #adb5bd; cursor: not-allowed; }
+        button.secondary { background: none; border: 1px solid #2d6a4f; color: #2d6a4f; }
+        button.secondary:hover:not(:disabled) { background: #e9f5ee; }
+
+        input[type=file] { font-size: 0.88rem; }
+
+        #global-status { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 16px; display: none; }
+        #global-status.success { display: block; background: #e9f5ee; color: #1b4332; border: 1px solid #b7e4c7; }
+        #global-status.error { display: block; background: #fbebec; color: #842029; border: 1px solid #e5a6ab; }
+        #global-status.info { display: block; background: #eef3fb; color: #1b3a6b; border: 1px solid #a9c2e8; }
+
+        .report-summary { display: flex; gap: 20px; margin: 12px 0; flex-wrap: wrap; }
+        .report-stat { background: #f8f9fa; border-radius: 6px; padding: 8px 14px; font-size: 0.85rem; color: #495057; }
+        .report-stat b { display: block; font-size: 1.3rem; color: #1b4332; }
+        .report-stat.error-stat b { color: #c1666b; }
+
+        .error-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 10px; }
+        .error-table th { text-align: left; background: #fbebec; color: #842029; padding: 6px 10px; border-bottom: 1px solid #e5a6ab; }
+        .error-table td { padding: 6px 10px; border-bottom: 1px solid #f1f3f5; }
+        .error-table tr:last-child td { border-bottom: none; }
+
+        .unmatched-list { background: #fff8e6; border: 1px solid #f0d78c; border-radius: 6px; padding: 10px 14px; font-size: 0.85rem; color: #7a5c00; margin-top: 10px; }
+        .unmatched-list ul { margin: 6px 0 0; padding-left: 20px; }
+
+        .save-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+        .save-status { font-size: 0.85rem; }
+        .save-status.error { color: #842029; }
+        .save-status.success { color: #1b4332; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <a class="title-link" href="/"><h1>Aphanologia</h1></a>
+        <a class="nav-link" href="/map">Map</a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/submit">Submit</a>
+        <a class="nav-link" href="/literature">Literature</a>
+        <div id="auth-status">Checking sign-in status&hellip;</div>
+    </div>
+
+    <div id="page">
+        <div id="gate" class="gate-message" style="display:none;"></div>
+
+        <div id="content" style="display:none;">
+            <h2>Batch Upload</h2>
+            <p class="subtext">Enter a whole batch of new samples and observations at once via a spreadsheet, rather than one at a time.</p>
+
+            <div id="global-status"></div>
+
+            <div class="panel">
+                <h2 style="font-size:1rem;"><span class="step-number">1</span>Download a template</h2>
+                <div class="field-row">
+                    <div class="field checkbox-field"><input type="checkbox" id="optDemographics" checked><label for="optDemographics" style="margin:0;">Include demographics sheet</label></div>
+                    <div class="field checkbox-field"><input type="checkbox" id="optSpecimens" checked><label for="optSpecimens" style="margin:0;">Include specimens sheet</label></div>
+                    <div class="field checkbox-field"><input type="checkbox" id="optValidTaxaOnly" checked><label for="optValidTaxaOnly" style="margin:0;">Only valid taxa <span class="hint">(in the reference sheet only)</span></label></div>
+                </div>
+                <div class="save-row">
+                    <button type="button" onclick="downloadTemplate()">Download Template</button>
+                </div>
+                <p class="subtext" style="margin-top:10px; margin-bottom:0;">New samples only - this can't add to samples already in the database. A species name that doesn't match anything already catalogued is never rejected; it's queued for a superuser to review after upload.</p>
+            </div>
+
+            <div class="panel">
+                <h2 style="font-size:1rem;"><span class="step-number">2</span>Upload your completed file</h2>
+                <div class="field-row">
+                    <input type="file" id="fileInput" accept=".xlsx">
+                </div>
+                <div class="save-row">
+                    <button type="button" class="secondary" onclick="validateFile()" id="validateBtn" disabled>Validate</button>
+                    <span class="save-status" id="validateStatus"></span>
+                </div>
+
+                <div id="report-container" style="display:none;">
+                    <div class="report-summary" id="report-summary"></div>
+                    <div id="report-errors"></div>
+                    <div id="report-unmatched"></div>
+                </div>
+            </div>
+
+            <div class="panel" id="commit-panel">
+                <h2 style="font-size:1rem;"><span class="step-number">3</span>Commit</h2>
+                <p class="subtext">The whole file is saved together, or nothing is - fix every row above before this becomes available.</p>
+                <div class="save-row">
+                    <button type="button" onclick="commitFile()" id="commitBtn" disabled>Commit Upload</button>
+                    <span class="save-status" id="commitStatus"></span>
+                </div>
+                <div id="commit-result"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let isContributor = false;
+        let selectedFile = null;
+        let lastValidationOk = false;
+
+        fetch('/api/v1/auth/me')
+            .then(r => r.json())
+            .then(data => {
+                const authEl = document.getElementById('auth-status');
+                if (data.logged_in) {
+                    authEl.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout">Sign out</a>`;
+                } else {
+                    authEl.innerHTML = `<a href="/auth/login">Sign in with Google</a>`;
+                }
+                currentUser = data.logged_in ? data : null;
+                isContributor = !!currentUser && ['contributor', 'superuser', 'hyperuser'].includes(currentUser.role);
+                gateContent();
+            })
+            .catch(() => gateContent());
+
+        function gateContent() {
+            const gate = document.getElementById('gate');
+            const content = document.getElementById('content');
+            if (isContributor) {
+                gate.style.display = 'none';
+                content.style.display = 'block';
+                if (['superuser', 'hyperuser'].includes(currentUser.role)) {
+                    setGlobalStatus('As a superuser, your uploads are auto-accepted rather than going through the review queue.', 'info');
+                }
+            } else {
+                gate.style.display = 'block';
+                content.style.display = 'none';
+                gate.textContent = currentUser
+                    ? 'This tool needs contributor access.'
+                    : 'Please sign in with a contributor account to use batch upload.';
+            }
+        }
+
+        function setGlobalStatus(text, cls) {
+            const el = document.getElementById('global-status');
+            el.textContent = text;
+            el.className = cls || '';
+        }
+        function setSaveStatus(elId, text, cls) {
+            const el = document.getElementById(elId);
+            el.textContent = text;
+            el.className = 'save-status' + (cls ? ' ' + cls : '');
+        }
+
+        document.getElementById('optDemographics').addEventListener('change', (e) => {
+            if (!e.target.checked) document.getElementById('optSpecimens').checked = false;
+            document.getElementById('optSpecimens').disabled = !e.target.checked;
+        });
+
+        function downloadTemplate() {
+            const params = new URLSearchParams({
+                include_demographics: document.getElementById('optDemographics').checked,
+                include_specimens: document.getElementById('optSpecimens').checked,
+                valid_taxa_only: document.getElementById('optValidTaxaOnly').checked
+            });
+            window.location.href = `/api/v1/batch/template?${params}`;
+        }
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            selectedFile = e.target.files[0] || null;
+            lastValidationOk = false;
+            document.getElementById('validateBtn').disabled = !selectedFile;
+            document.getElementById('commitBtn').disabled = true;
+            document.getElementById('report-container').style.display = 'none';
+            setSaveStatus('validateStatus', '', '');
+            setSaveStatus('commitStatus', '', '');
+            document.getElementById('commit-result').innerHTML = '';
+        });
+
+        async function validateFile() {
+            if (!selectedFile) return;
+            setSaveStatus('validateStatus', 'Validating...', '');
+            document.getElementById('commitBtn').disabled = true;
+            lastValidationOk = false;
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                const res = await fetch('/api/v1/batch/validate', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('validateStatus', data.detail || 'Validation failed.', 'error');
+                    return;
+                }
+                renderReport(data);
+                setSaveStatus('validateStatus', '', '');
+                if (data.can_commit) {
+                    lastValidationOk = true;
+                    document.getElementById('commitBtn').disabled = false;
+                    setGlobalStatus('This file is valid and ready to commit.', 'success');
+                } else {
+                    setGlobalStatus(`This file has ${data.errors.length} problem(s) to fix before it can be uploaded.`, 'error');
+                }
+            } catch (err) {
+                setSaveStatus('validateStatus', 'Validation failed: ' + err, 'error');
+            }
+        }
+
+        function renderReport(data) {
+            const container = document.getElementById('report-container');
+            container.style.display = 'block';
+
+            const counts = data.counts || {};
+            document.getElementById('report-summary').innerHTML = `
+                <div class="report-stat"><b>${counts.samples ?? 0}</b>Samples</div>
+                <div class="report-stat"><b>${counts.observations ?? 0}</b>Observations</div>
+                <div class="report-stat"><b>${counts.demographics ?? 0}</b>Demographics</div>
+                <div class="report-stat"><b>${counts.specimens ?? 0}</b>Specimens</div>
+                <div class="report-stat error-stat"><b>${data.errors.length}</b>Problems found</div>
+            `;
+
+            const errorsEl = document.getElementById('report-errors');
+            if (data.errors.length === 0) {
+                errorsEl.innerHTML = '';
+            } else {
+                errorsEl.innerHTML = `
+                    <table class="error-table">
+                        <thead><tr><th>Sheet</th><th>Row</th><th>Problem</th></tr></thead>
+                        <tbody>
+                            ${data.errors.map(e => `<tr><td>${e.sheet || '-'}</td><td>${e.row ?? '-'}</td><td>${e.message}</td></tr>`).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            const unmatchedEl = document.getElementById('report-unmatched');
+            if (data.unmatched_taxa && data.unmatched_taxa.length > 0) {
+                unmatchedEl.innerHTML = `
+                    <div class="unmatched-list">
+                        <b>${data.unmatched_taxa.length} species name(s) don't match anything already catalogued.</b>
+                        This won't block the upload - they'll be queued for a superuser to review afterwards.
+                        <ul>${data.unmatched_taxa.map(n => `<li>${n}</li>`).join('')}</ul>
+                    </div>
+                `;
+            } else {
+                unmatchedEl.innerHTML = '';
+            }
+        }
+
+        async function commitFile() {
+            if (!selectedFile || !lastValidationOk) return;
+            setSaveStatus('commitStatus', 'Committing...', '');
+            document.getElementById('commitBtn').disabled = true;
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                const res = await fetch('/api/v1/batch/commit', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('commitStatus', data.detail || 'Commit failed.', 'error');
+                    document.getElementById('commitBtn').disabled = false;
+                    return;
+                }
+                setSaveStatus('commitStatus', 'Done.', 'success');
+                let resultHtml = `
+                    <p class="subtext" style="margin-top:12px;">
+                        Created ${data.samples_created} sample(s), ${data.observations_created} observation(s),
+                        ${data.demographics_created} demographic group(s), ${data.specimens_created} specimen(s).
+                        ${data.auto_verified ? 'Auto-accepted (superuser upload).' : 'Submitted for review - see the <a href="/review">Review Queue</a>.'}
+                    </p>
+                `;
+                if (data.queued_for_taxonomy_review && data.queued_for_taxonomy_review.length > 0) {
+                    resultHtml += `
+                        <div class="unmatched-list">
+                            <b>${data.queued_for_taxonomy_review.length} species name(s) queued for taxon resolution:</b>
+                            <ul>${data.queued_for_taxonomy_review.map(n => `<li>${n}</li>`).join('')}</ul>
+                            See <a href="/review">Review Queue</a> - "Unresolved taxa".
+                        </div>
+                    `;
+                }
+                document.getElementById('commit-result').innerHTML = resultHtml;
+                setGlobalStatus('Batch upload committed successfully.', 'success');
+
+                // Reset for another upload
+                selectedFile = null;
+                lastValidationOk = false;
+                document.getElementById('fileInput').value = '';
+                document.getElementById('validateBtn').disabled = true;
+            } catch (err) {
+                setSaveStatus('commitStatus', 'Commit failed: ' + err, 'error');
+                document.getElementById('commitBtn').disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
