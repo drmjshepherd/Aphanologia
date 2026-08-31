@@ -182,6 +182,8 @@
         <a class="title-link" href="/"><h1>Aphanologia: Submit a Record</h1></a>
         <a class="nav-link" href="/map">Map</a>
         <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/literature">Literature</a>
+        <a class="nav-link" href="/batch/upload">Batch Upload</a>
         <div id="auth-status"></div>
     </div>
 
@@ -209,37 +211,21 @@
                             <select id="f-source-category"></select>
                         </div>
                     </div>
+                    <div class="field-row">
+                        <div class="field full" style="flex-direction:row; align-items:center; gap:8px;">
+                            <input type="checkbox" id="f-only-valid-taxa" checked style="width:auto;">
+                            <label for="f-only-valid-taxa" style="margin:0; font-weight:normal;">Only allow valid taxa <span style="color:#868e96;">(unticks automatically for Published literature - a source may use a name the database has since synonymised)</span></label>
+                        </div>
+                    </div>
 
                     <div id="source-picker" style="display:none;">
-                        <!-- Published literature picker -->
+                        <!-- Published literature picker (shared widget - see /static/js/literature_widget.js) -->
                         <div id="source-literature-block" style="display:none;">
                             <div class="field-row">
-                                <div class="field full source-search-wrapper">
+                                <div class="field full">
                                     <label>Find the reference</label>
-                                    <input type="text" id="source-lit-search" placeholder="Search by author, title, or year..." autocomplete="off">
-                                    <div id="source-lit-dropdown" class="source-dropdown"></div>
-                                    <div id="source-lit-selected" class="source-selected-note"></div>
+                                    <div id="source-lit-widget"></div>
                                 </div>
-                            </div>
-                            <button type="button" class="toggle-add-link" onclick="document.getElementById('source-lit-add-form').classList.toggle('visible')">+ Can't find it? Add a new reference</button>
-                            <div id="source-lit-add-form" class="source-add-form">
-                                <div class="field-row">
-                                    <div class="field"><label>Author(s)</label><input type="text" id="lit-author"></div>
-                                    <div class="field"><label>Year</label><input type="text" id="lit-year"></div>
-                                </div>
-                                <div class="field-row">
-                                    <div class="field full"><label>Article / chapter title</label><input type="text" id="lit-articletitle"></div>
-                                </div>
-                                <div class="field-row">
-                                    <div class="field"><label>Publication title</label><input type="text" id="lit-pubtitle"></div>
-                                    <div class="field"><label>Volume</label><input type="text" id="lit-volume"></div>
-                                    <div class="field"><label>Pages</label><input type="text" id="lit-pages"></div>
-                                </div>
-                                <div class="field-row">
-                                    <div class="field full"><label>URL <span class="hint">(if available online)</span></label><input type="text" id="lit-url"></div>
-                                </div>
-                                <button type="button" class="small" onclick="addNewLiteratureReference()">Add this reference</button>
-                                <div id="lit-add-status"></div>
                             </div>
                         </div>
 
@@ -494,6 +480,7 @@
         </div>
     </div>
 
+    <script src="/static/js/literature_widget.js"></script>
     <script>
         // ==================================================
         // AUTH GATE
@@ -788,7 +775,6 @@
         populateSelectWithOptions(document.getElementById('f-source-category'), SOURCE_CATEGORIES, "Select a source type");
         populateSelectWithOptions(document.getElementById('proj-category'), PROJECT_CATEGORIES, "Select a category");
 
-        let selectedSourceLiteratureID = null;
         let selectedSourceProjectID = null;
 
         document.getElementById('f-source-category').addEventListener('change', (e) => {
@@ -806,66 +792,22 @@
                     cat === 'Other' ? 'Please specify' :
                     'Detail (optional)';
             }
+            // "Only allow valid taxa" defaults on, except for Published
+            // literature - working through a paper often means
+            // recording a species under a name this database has
+            // since synonymised, so that source type shouldn't hide
+            // it. Still just a default; the box can be toggled either
+            // way afterwards regardless of category.
+            document.getElementById('f-only-valid-taxa').checked = (cat !== 'Published literature');
         });
 
-        // --- Literature fuzzy search ---
-        const litSearchBox = document.getElementById('source-lit-search');
-        const litDropdown = document.getElementById('source-lit-dropdown');
-        let litSearchTimer = null;
-        litSearchBox.addEventListener('input', () => {
-            clearTimeout(litSearchTimer);
-            selectedSourceLiteratureID = null;
-            document.getElementById('source-lit-selected').textContent = '';
-            const q = litSearchBox.value.trim();
-            if (q.length < 2) { litDropdown.classList.remove('visible'); return; }
-            litSearchTimer = setTimeout(async () => {
-                try {
-                    const res = await fetch(`/api/v1/literature/search?q=${encodeURIComponent(q)}&limit=15`);
-                    const data = await res.json();
-                    litDropdown.innerHTML = data.results.length === 0
-                        ? '<div class="source-result-row">No matches - try adding it below</div>'
-                        : data.results.map(r => `<div class="source-result-row" data-lit-id="${r.lit_id}">${r.formatted_ref}</div>`).join('');
-                    litDropdown.querySelectorAll('[data-lit-id]').forEach(row => {
-                        row.addEventListener('click', () => {
-                            selectedSourceLiteratureID = row.dataset.litId;
-                            litSearchBox.value = row.textContent;
-                            document.getElementById('source-lit-selected').textContent = `Selected reference (litID ${selectedSourceLiteratureID})`;
-                            litDropdown.classList.remove('visible');
-                        });
-                    });
-                    litDropdown.classList.add('visible');
-                } catch (err) {
-                    litDropdown.innerHTML = '<div class="source-result-row">Search failed</div>';
-                }
-            }, 300);
+        // --- Literature picker (shared widget - handles both search
+        // and "add a new reference", including the full field set) ---
+        let selectedSourceLiteratureID = null;
+        const sourceLitWidget = LiteratureWidget.mount(document.getElementById('source-lit-widget'), {
+            placeholder: 'Search by author, title, or year...',
+            onSelected: (lit) => { selectedSourceLiteratureID = lit ? lit.litID : null; }
         });
-
-        async function addNewLiteratureReference() {
-            const statusEl = document.getElementById('lit-add-status');
-            statusEl.innerHTML = '';
-            const payload = {
-                authorName: document.getElementById('lit-author').value || null,
-                yearPublished: document.getElementById('lit-year').value || null,
-                articleTitle: document.getElementById('lit-articletitle').value || null,
-                publicationTitle: document.getElementById('lit-pubtitle').value || null,
-                publicationVolume: document.getElementById('lit-volume').value || null,
-                publicationPages: document.getElementById('lit-pages').value || null,
-                sourceURL: document.getElementById('lit-url').value || null,
-            };
-            try {
-                const res = await fetch('/api/v1/literature', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || 'Could not add reference');
-                selectedSourceLiteratureID = data.litID;
-                litSearchBox.value = `${payload.authorName || ''}, ${payload.yearPublished || ''}`.trim();
-                document.getElementById('source-lit-selected').textContent = `Selected reference (litID ${selectedSourceLiteratureID})`;
-                document.getElementById('source-lit-add-form').classList.remove('visible');
-            } catch (err) {
-                statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
-            }
-        }
 
         // --- Project fuzzy search ---
         const projSearchBox = document.getElementById('source-proj-search');
@@ -929,20 +871,19 @@
 
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.source-search-wrapper')) {
-                litDropdown.classList.remove('visible');
                 projDropdown.classList.remove('visible');
             }
         });
 
         function resetSourcePicker() {
             document.getElementById('f-source-category').value = '';
+            document.getElementById('f-only-valid-taxa').checked = true;
             document.getElementById('source-picker').style.display = 'none';
             document.getElementById('source-literature-block').style.display = 'none';
             document.getElementById('source-project-block').style.display = 'none';
             document.getElementById('source-other-block').style.display = 'none';
-            litSearchBox.value = '';
+            sourceLitWidget.clear();
             projSearchBox.value = '';
-            document.getElementById('source-lit-selected').textContent = '';
             document.getElementById('source-proj-selected').textContent = '';
             document.getElementById('source-other-detail').value = '';
             selectedSourceLiteratureID = null;
@@ -1067,7 +1008,8 @@
 
         async function runObsTaxonSearch(query) {
             try {
-                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=25`);
+                const validOnly = document.getElementById('f-only-valid-taxa').checked;
+                const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(query)}&limit=25&valid_only=${validOnly}`);
                 const data = await res.json();
                 obsDropdown.innerHTML = '';
                 if (data.results.length === 0) {
