@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia - Literature</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; color: #212529; }
+        #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        #header h1 { margin: 0; font-size: 1.2rem; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #header a.nav-link:hover { text-decoration: underline; }
+        #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
+        #auth-status a { color: white; }
+
+        #page { max-width: 900px; margin: 0 auto; padding: 24px 20px 80px; }
+        h2 { color: #1b4332; font-size: 1.1rem; margin: 0 0 4px; }
+        .subtext { color: #6c757d; font-size: 0.85rem; margin: 0 0 16px; }
+        .panel { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 18px 20px; margin-bottom: 20px; }
+
+        #global-status { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 16px; display: none; }
+        #global-status.success { display: block; background: #e9f5ee; color: #1b4332; border: 1px solid #b7e4c7; }
+        #global-status.error { display: block; background: #fbebec; color: #842029; border: 1px solid #e5a6ab; }
+        #global-status.info { display: block; background: #eef3fb; color: #1b3a6b; border: 1px solid #a9c2e8; }
+
+        input[type=text], select, textarea {
+            width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid #ced4da;
+            border-radius: 4px; font-size: 0.9rem; font-family: inherit; background: white;
+        }
+        textarea { resize: vertical; min-height: 44px; }
+        .field-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+        .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 180px; }
+        .field.full { flex-basis: 100%; }
+        .field label { font-weight: 600; font-size: 0.78rem; color: #2d6a4f; }
+
+        button { background: #2d6a4f; color: white; border: none; padding: 9px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.88rem; }
+        button:hover { background: #1b4332; }
+        button.secondary { background: none; border: 1px solid #2d6a4f; color: #2d6a4f; }
+        button.secondary:hover { background: #e9f5ee; }
+        button.danger { background: none; border: 1px solid #c1666b; color: #c1666b; }
+        button.danger:hover { background: #fbebec; }
+        button.small { padding: 5px 10px; font-size: 0.78rem; }
+        .save-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+        .save-status { font-size: 0.85rem; }
+        .save-status.error { color: #842029; }
+        .save-status.success { color: #1b4332; font-weight: 600; }
+
+        .browse-search { margin-bottom: 14px; }
+        .lit-row { border-top: 1px solid #f1f3f5; padding: 10px 0; cursor: pointer; }
+        .lit-row:first-child { border-top: none; }
+        .lit-row:hover { background: #f8f9fa; }
+        .lit-row .lit-ref { font-size: 0.9rem; color: #212529; }
+        .lit-row .lit-id { font-size: 0.74rem; color: #adb5bd; }
+        .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 0.85rem; color: #6c757d; }
+
+        #detail-panel { display: none; }
+        #detail-panel .detail-ref { font-style: italic; color: #1b4332; font-size: 1.05rem; margin-bottom: 4px; }
+        #detail-panel .detail-fields { color: #495057; font-size: 0.86rem; line-height: 1.6; margin-bottom: 10px; }
+        #detail-panel .detail-fields b { color: #2d6a4f; }
+        .usage-badges { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+        .usage-badge { background: #f1f3f5; border-radius: 12px; padding: 4px 10px; font-size: 0.78rem; color: #495057; }
+        .usage-badge.zero { color: #adb5bd; }
+
+        .taxon-link-row { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f1f3f5; padding: 6px 0; font-size: 0.85rem; }
+        .taxon-link-row:first-child { border-top: none; }
+        .taxon-link-row .tl-name { font-style: italic; color: #1b4332; }
+        .taxon-link-row .tl-type { color: #6c757d; font-size: 0.76rem; }
+
+        .taxon-search-wrapper { position: relative; }
+        .taxon-dropdown-box {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 300px; overflow-y: auto;
+            z-index: 100; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .taxon-dropdown-box.visible { display: block; }
+        .taxon-result-row { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.88rem; }
+        .taxon-result-row:hover { background: #e9ecef; }
+        .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
+        .taxon-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
+        .picker-current { font-size: 0.85rem; padding: 6px 0; color: #212529; }
+        .picker-current .placeholder { color: #adb5bd; font-style: italic; }
+
+        .signin-note { color: #6c757d; font-size: 0.85rem; font-style: italic; }
+        #edit-form { display: none; margin-top: 12px; border-top: 1px solid #f1f3f5; padding-top: 12px; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <a class="title-link" href="/"><h1>Aphanologia</h1></a>
+        <a class="nav-link" href="/map">Map</a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/submit">Submit</a>
+        <div id="auth-status">Checking sign-in status&hellip;</div>
+    </div>
+
+    <div id="page">
+        <h2>Literature</h2>
+        <p class="subtext">The reference library behind this database's identifications, synonymy decisions, and records.</p>
+
+        <div id="global-status"></div>
+
+        <div class="panel">
+            <h2 style="font-size:1rem;">Find or add a reference</h2>
+            <div id="lit-widget-container"></div>
+            <p class="signin-note" id="add-signin-note" style="display:none;">Sign in with a contributor account to add new references.</p>
+        </div>
+
+        <div class="panel">
+            <h2 style="font-size:1rem;">Browse all literature</h2>
+            <div class="field full browse-search">
+                <input type="text" id="browseSearch" placeholder="Filter by author, title, year...">
+            </div>
+            <div id="browseList">Loading&hellip;</div>
+            <div class="pagination">
+                <button type="button" class="secondary small" id="browsePrev" onclick="changeBrowsePage(-1)">&larr; Previous</button>
+                <span id="browsePageInfo"></span>
+                <button type="button" class="secondary small" id="browseNext" onclick="changeBrowsePage(1)">Next &rarr;</button>
+            </div>
+        </div>
+
+        <div class="panel" id="detail-panel">
+            <div class="detail-ref" id="detailRef"></div>
+            <div class="detail-fields" id="detailFields"></div>
+            <div class="usage-badges" id="usageBadges"></div>
+
+            <div id="linked-taxa-block">
+                <h2 style="font-size:0.9rem;">Linked to taxa</h2>
+                <div id="linkedTaxaList"></div>
+            </div>
+
+            <div id="superuser-actions" style="display:none; margin-top:16px; border-top:1px solid #f1f3f5; padding-top:14px;">
+                <div class="save-row">
+                    <button type="button" class="secondary" onclick="toggleEditForm()">Edit fields</button>
+                    <button type="button" class="danger" onclick="deleteCurrentLiterature()">Delete</button>
+                </div>
+
+                <div id="edit-form">
+                    <div class="field-row">
+                        <div class="field"><label>Author(s)</label><input type="text" id="ed-author"></div>
+                        <div class="field"><label>Editor(s)</label><input type="text" id="ed-editor"></div>
+                        <div class="field"><label>Year</label><input type="text" id="ed-year"></div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full"><label>Article / chapter title</label><input type="text" id="ed-articletitle"></div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field"><label>Publication title</label><input type="text" id="ed-pubtitle"></div>
+                        <div class="field"><label>Series</label><input type="text" id="ed-series"></div>
+                        <div class="field"><label>Volume</label><input type="text" id="ed-volume"></div>
+                        <div class="field"><label>Issue</label><input type="text" id="ed-issue"></div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field"><label>Pages</label><input type="text" id="ed-pages"></div>
+                        <div class="field"><label>Total pages</label><input type="text" id="ed-totalpages"></div>
+                        <div class="field"><label>Publisher</label><input type="text" id="ed-publisher"></div>
+                        <div class="field"><label>ISBN / ISSN</label><input type="text" id="ed-isbn"></div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field"><label>DOI</label><input type="text" id="ed-doi"></div>
+                        <div class="field full"><label>URL</label><input type="text" id="ed-url"></div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full"><label>Notes</label><textarea id="ed-notes"></textarea></div>
+                    </div>
+                    <div class="save-row">
+                        <button type="button" onclick="saveLiteratureEdit()">Save changes</button>
+                        <button type="button" class="secondary" onclick="toggleEditForm()">Cancel</button>
+                        <span class="save-status" id="editLitStatus"></span>
+                    </div>
+                </div>
+
+                <h2 style="font-size:0.9rem; margin-top:18px;">Assign to a taxon</h2>
+                <div class="field-row">
+                    <div class="field full">
+                        <div class="taxon-search-wrapper">
+                            <input type="text" id="assignTaxonSearch" placeholder="Search for a taxon..." autocomplete="off">
+                            <div id="assign-taxon-dropdown" class="taxon-dropdown-box"></div>
+                        </div>
+                        <div class="picker-current" id="assignTaxonCurrent"><span class="placeholder">Not set</span></div>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="assignType">Relationship type</label>
+                        <select id="assignType">
+                            <option value="Taxonomy or synonymy from">Taxonomy or synonymy from</option>
+                            <option value="Name first published in">Name first published in</option>
+                            <option value="As used in">As used in</option>
+                            <option value="Presence in UK from">Presence in UK from</option>
+                            <option value="Identification Key">Identification Key</option>
+                        </select>
+                    </div>
+                    <div class="field" id="assignKeyScopeField" style="display:none;">
+                        <label for="assignKeyScope">Key covers rank <span style="font-weight:normal; color:#868e96;">(optional)</span></label>
+                        <input type="text" id="assignKeyScope">
+                    </div>
+                </div>
+                <div class="save-row">
+                    <button type="button" class="secondary" onclick="assignToTaxon()">Assign</button>
+                    <span class="save-status" id="assignStatus"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/literature_widget.js"></script>
+    <script>
+        let currentUser = null;
+        let isContributor = false;
+        let isSuperuser = false;
+        let currentLitId = null;
+
+        fetch('/api/v1/auth/me')
+            .then(r => r.json())
+            .then(data => {
+                const authEl = document.getElementById('auth-status');
+                if (data.logged_in) {
+                    authEl.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout">Sign out</a>`;
+                } else {
+                    authEl.innerHTML = `<a href="/auth/login">Sign in with Google</a>`;
+                }
+                currentUser = data.logged_in ? data : null;
+                isContributor = !!currentUser && ['contributor', 'superuser', 'hyperuser'].includes(currentUser.role);
+                isSuperuser = !!currentUser && ['superuser', 'hyperuser'].includes(currentUser.role);
+                applyPermissionUI();
+            })
+            .catch(() => applyPermissionUI());
+
+        function applyPermissionUI() {
+            document.getElementById('add-signin-note').style.display = isContributor ? 'none' : 'block';
+            document.getElementById('lit-widget-container').style.display = isContributor ? 'block' : 'none';
+            if (currentLitId) renderSuperuserVisibility();
+        }
+
+        function renderSuperuserVisibility() {
+            document.getElementById('superuser-actions').style.display = isSuperuser ? 'block' : 'none';
+        }
+
+        function setGlobalStatus(text, cls) {
+            const el = document.getElementById('global-status');
+            el.textContent = text;
+            el.className = cls || '';
+        }
+
+        // ---------- find-or-add widget ----------
+        const litWidget = LiteratureWidget.mount(document.getElementById('lit-widget-container'), {
+            placeholder: 'Search author, title, year...',
+            onSelected: (lit) => { if (lit) loadDetail(lit.litID); }
+        });
+
+        // ---------- browse list ----------
+        let browseQuery = '';
+        let browseOffset = 0;
+        const BROWSE_LIMIT = 20;
+        let browseTimer = null;
+
+        document.getElementById('browseSearch').addEventListener('input', (e) => {
+            clearTimeout(browseTimer);
+            browseTimer = setTimeout(() => {
+                browseQuery = e.target.value.trim();
+                browseOffset = 0;
+                loadBrowseList();
+            }, 300);
+        });
+
+        function changeBrowsePage(direction) {
+            browseOffset = Math.max(0, browseOffset + direction * BROWSE_LIMIT);
+            loadBrowseList();
+        }
+
+        function formatLitRef(entry) {
+            return [entry.authorName, entry.yearPublished, entry.articleTitle || entry.publicationTitle]
+                .filter(Boolean).join(', ') || '(untitled reference)';
+        }
+
+        async function loadBrowseList() {
+            const list = document.getElementById('browseList');
+            list.innerHTML = 'Loading&hellip;';
+            try {
+                const params = new URLSearchParams({ limit: BROWSE_LIMIT, offset: browseOffset });
+                if (browseQuery) params.set('q', browseQuery);
+                const res = await fetch(`/api/v1/literature?${params}`);
+                const data = await res.json();
+                if (data.results.length === 0) {
+                    list.innerHTML = '<p class="signin-note">No matching references.</p>';
+                } else {
+                    list.innerHTML = '';
+                    data.results.forEach(entry => {
+                        const row = document.createElement('div');
+                        row.className = 'lit-row';
+                        row.innerHTML = `
+                            <div class="lit-ref">${formatLitRef(entry)}</div>
+                            <div class="lit-id">${entry.litID}${entry.publicationTitle ? ' &middot; ' + entry.publicationTitle : ''}</div>
+                        `;
+                        row.addEventListener('click', () => loadDetail(entry.litID));
+                        list.appendChild(row);
+                    });
+                }
+                const from = data.total === 0 ? 0 : browseOffset + 1;
+                const to = Math.min(browseOffset + BROWSE_LIMIT, data.total);
+                document.getElementById('browsePageInfo').textContent = `${from}-${to} of ${data.total}`;
+                document.getElementById('browsePrev').disabled = browseOffset === 0;
+                document.getElementById('browseNext').disabled = to >= data.total;
+            } catch (err) {
+                list.innerHTML = '<p class="signin-note">Could not load literature.</p>';
+            }
+        }
+        loadBrowseList();
+
+        // ---------- detail panel ----------
+        async function loadDetail(litId) {
+            try {
+                const res = await fetch(`/api/v1/literature/${encodeURIComponent(litId)}`);
+                if (!res.ok) { alert('Could not load that reference.'); return; }
+                const data = await res.json();
+                const entry = data.entry;
+                currentLitId = entry.litID;
+
+                document.getElementById('detailRef').textContent = formatLitRef(entry);
+                const fieldRows = [
+                    ['Editor(s)', entry.editorName], ['Publication', entry.publicationTitle],
+                    ['Series', entry.publicationSeries], ['Volume', entry.publicationVolume],
+                    ['Issue', entry.publicationIssue], ['Pages', entry.publicationPages],
+                    ['Total pages', entry.publicationTotalpages], ['Publisher', entry.publishedBy],
+                    ['ISBN/ISSN', entry.publicationISBNorISSN], ['DOI', entry.publicationDOI],
+                    ['Notes', entry.litNotes]
+                ].filter(([, v]) => v);
+                document.getElementById('detailFields').innerHTML =
+                    fieldRows.map(([label, val]) => `<b>${label}:</b> ${val}`).join('<br>') +
+                    (entry.sourceURL ? `<br><a href="${entry.sourceURL}" target="_blank" rel="noopener">${entry.sourceURL}</a>` : '');
+
+                const usage = data.usage;
+                document.getElementById('usageBadges').innerHTML = `
+                    <span class="usage-badge ${usage.observations === 0 ? 'zero' : ''}">${usage.observations} observation(s)</span>
+                    <span class="usage-badge ${usage.samples === 0 ? 'zero' : ''}">${usage.samples} sample(s)</span>
+                    <span class="usage-badge ${usage.taxa === 0 ? 'zero' : ''}">${usage.taxa} taxon/taxa</span>
+                `;
+
+                const taxaList = document.getElementById('linkedTaxaList');
+                if (data.linked_taxa.length === 0) {
+                    taxaList.innerHTML = '<p class="signin-note">Not linked to any taxa yet.</p>';
+                } else {
+                    taxaList.innerHTML = '';
+                    data.linked_taxa.forEach(t => {
+                        const row = document.createElement('div');
+                        row.className = 'taxon-link-row';
+                        row.innerHTML = `
+                            <span><span class="tl-name">${t.scientific_name}</span> <span class="tl-type">${t.type}</span></span>
+                            ${isSuperuser ? `<button type="button" class="small danger" data-taxon="${t.taxon_id}" data-type="${t.type}">Unlink</button>` : ''}
+                        `;
+                        const btn = row.querySelector('button');
+                        if (btn) btn.addEventListener('click', () => unlinkFromTaxon(t.taxon_id, t.type));
+                        taxaList.appendChild(row);
+                    });
+                }
+
+                // Pre-fill the edit form (hidden until "Edit fields" is clicked)
+                document.getElementById('ed-author').value = entry.authorName || '';
+                document.getElementById('ed-editor').value = entry.editorName || '';
+                document.getElementById('ed-year').value = entry.yearPublished || '';
+                document.getElementById('ed-articletitle').value = entry.articleTitle || '';
+                document.getElementById('ed-pubtitle').value = entry.publicationTitle || '';
+                document.getElementById('ed-series').value = entry.publicationSeries || '';
+                document.getElementById('ed-volume').value = entry.publicationVolume || '';
+                document.getElementById('ed-issue').value = entry.publicationIssue || '';
+                document.getElementById('ed-pages').value = entry.publicationPages || '';
+                document.getElementById('ed-totalpages').value = entry.publicationTotalpages || '';
+                document.getElementById('ed-publisher').value = entry.publishedBy || '';
+                document.getElementById('ed-isbn').value = entry.publicationISBNorISSN || '';
+                document.getElementById('ed-doi').value = entry.publicationDOI || '';
+                document.getElementById('ed-url').value = entry.sourceURL || '';
+                document.getElementById('ed-notes').value = entry.litNotes || '';
+                document.getElementById('edit-form').style.display = 'none';
+                setSaveStatus('editLitStatus', '', '');
+                clearAssignTaxon();
+
+                renderSuperuserVisibility();
+                document.getElementById('detail-panel').style.display = 'block';
+                document.getElementById('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (err) {
+                console.error('loadDetail failed:', err);
+                alert('Could not load that reference.');
+            }
+        }
+
+        function setSaveStatus(elId, text, cls) {
+            const el = document.getElementById(elId);
+            el.textContent = text;
+            el.className = 'save-status' + (cls ? ' ' + cls : '');
+        }
+
+        function toggleEditForm() {
+            const form = document.getElementById('edit-form');
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function saveLiteratureEdit() {
+            if (!currentLitId) return;
+            const payload = {
+                authorName: document.getElementById('ed-author').value || null,
+                editorName: document.getElementById('ed-editor').value || null,
+                yearPublished: document.getElementById('ed-year').value || null,
+                articleTitle: document.getElementById('ed-articletitle').value || null,
+                publicationTitle: document.getElementById('ed-pubtitle').value || null,
+                publicationSeries: document.getElementById('ed-series').value || null,
+                publicationVolume: document.getElementById('ed-volume').value || null,
+                publicationIssue: document.getElementById('ed-issue').value || null,
+                publicationTotalpages: document.getElementById('ed-totalpages').value || null,
+                publicationPages: document.getElementById('ed-pages').value || null,
+                publishedBy: document.getElementById('ed-publisher').value || null,
+                publicationISBNorISSN: document.getElementById('ed-isbn').value || null,
+                publicationDOI: document.getElementById('ed-doi').value || null,
+                sourceURL: document.getElementById('ed-url').value || null,
+                litNotes: document.getElementById('ed-notes').value || null
+            };
+            setSaveStatus('editLitStatus', 'Saving...', '');
+            try {
+                const res = await fetch(`/api/v1/literature/${encodeURIComponent(currentLitId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('editLitStatus', data.detail || 'Save failed.', 'error');
+                    setGlobalStatus(`Could not save: ${data.detail || 'unknown error.'}`, 'error');
+                    return;
+                }
+                if (data.changed_fields.length === 0) {
+                    setSaveStatus('editLitStatus', 'No changes to save.', '');
+                    return;
+                }
+                setGlobalStatus(`Saved changes (${data.changed_fields.join(', ')}).`, 'success');
+                document.getElementById('edit-form').style.display = 'none';
+                loadDetail(currentLitId);
+                loadBrowseList();
+            } catch (err) {
+                console.error('saveLiteratureEdit failed:', err);
+                setSaveStatus('editLitStatus', 'Save failed: ' + err, 'error');
+            }
+        }
+
+        async function deleteCurrentLiterature() {
+            if (!currentLitId) return;
+            if (!confirm('Delete this literature entry? This cannot be undone.')) return;
+            try {
+                const res = await fetch(`/api/v1/literature/${encodeURIComponent(currentLitId)}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) {
+                    setGlobalStatus(data.detail || 'Could not delete.', 'error');
+                    return;
+                }
+                setGlobalStatus('Literature entry deleted.', 'success');
+                document.getElementById('detail-panel').style.display = 'none';
+                currentLitId = null;
+                loadBrowseList();
+            } catch (err) {
+                setGlobalStatus('Delete failed: ' + err, 'error');
+            }
+        }
+
+        // ---------- assign to taxon ----------
+        let assignTaxonId = null;
+
+        function clearAssignTaxon() {
+            assignTaxonId = null;
+            document.getElementById('assignTaxonSearch').value = '';
+            document.getElementById('assignTaxonCurrent').innerHTML = '<span class="placeholder">Not set</span>';
+        }
+
+        document.getElementById('assignType').addEventListener('change', (e) => {
+            document.getElementById('assignKeyScopeField').style.display = (e.target.value === 'Identification Key') ? 'flex' : 'none';
+        });
+
+        (function wireAssignTaxonPicker() {
+            const input = document.getElementById('assignTaxonSearch');
+            const dropdown = document.getElementById('assign-taxon-dropdown');
+            let timer = null;
+            let suppress = false;
+            input.addEventListener('input', () => {
+                if (suppress) { suppress = false; return; }
+                clearTimeout(timer);
+                const q = input.value.trim();
+                if (q.length < 3) { dropdown.classList.remove('visible'); dropdown.innerHTML = ''; return; }
+                timer = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(q)}&limit=20`);
+                        const data = await res.json();
+                        dropdown.innerHTML = '';
+                        if (data.results.length === 0) {
+                            dropdown.innerHTML = '<div class="taxon-result-row">No matches</div>';
+                        } else {
+                            data.results.forEach(t => {
+                                const row = document.createElement('div');
+                                row.className = 'taxon-result-row';
+                                row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank || ''}</span>`;
+                                row.addEventListener('click', () => {
+                                    dropdown.classList.remove('visible');
+                                    dropdown.innerHTML = '';
+                                    suppress = true;
+                                    input.value = t.scientific_name;
+                                    assignTaxonId = t.taxon_id;
+                                    document.getElementById('assignTaxonCurrent').innerHTML = `<i>${t.scientific_name}</i> <span style="color:#adb5bd;">(${t.taxon_id})</span>`;
+                                });
+                                dropdown.appendChild(row);
+                            });
+                        }
+                        dropdown.classList.add('visible');
+                    } catch (err) { dropdown.classList.remove('visible'); }
+                }, 300);
+            });
+            document.addEventListener('click', (e) => {
+                if (!input.contains(e.target) && !dropdown.contains(e.target)) dropdown.classList.remove('visible');
+            });
+        })();
+
+        async function assignToTaxon() {
+            if (!currentLitId) return;
+            if (!assignTaxonId) {
+                setSaveStatus('assignStatus', 'Search for and select a taxon first.', 'error');
+                return;
+            }
+            const type = document.getElementById('assignType').value;
+            const payload = {
+                litID: currentLitId,
+                Type: type,
+                key_scope_rank: (type === 'Identification Key') ? (document.getElementById('assignKeyScope').value || null) : null,
+                online_resource_url: null,
+                access_notes: null,
+                notes: null
+            };
+            setSaveStatus('assignStatus', 'Assigning...', '');
+            try {
+                const res = await fetch(`/api/v1/admin/taxonomy/${encodeURIComponent(assignTaxonId)}/literature-links`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('assignStatus', data.detail || 'Could not assign.', 'error');
+                    return;
+                }
+                setSaveStatus('assignStatus', 'Assigned.', 'success');
+                clearAssignTaxon();
+                document.getElementById('assignKeyScope').value = '';
+                document.getElementById('assignKeyScopeField').style.display = 'none';
+                loadDetail(currentLitId);
+            } catch (err) {
+                setSaveStatus('assignStatus', 'Failed: ' + err, 'error');
+            }
+        }
+
+        async function unlinkFromTaxon(taxonId, type) {
+            if (!confirm('Unlink this reference from that taxon?')) return;
+            try {
+                const res = await fetch(
+                    `/api/v1/admin/taxonomy/${encodeURIComponent(taxonId)}/literature-links?type=${encodeURIComponent(type)}&lit_id=${encodeURIComponent(currentLitId)}`,
+                    { method: 'DELETE' }
+                );
+                const data = await res.json();
+                if (!res.ok) { alert(data.detail || 'Could not unlink.'); return; }
+                loadDetail(currentLitId);
+            } catch (err) {
+                alert('Failed: ' + err);
+            }
+        }
+    </script>
+</body>
+</html>
