@@ -774,7 +774,11 @@ I also noticed on this pass that the taxon-search-picker code is now duplicated 
 ## Editing samples and observations for superusers
 The one final element that the superuser now needs is the ability to edit the observations (samples, observations, observation demographics, and specimens).  This will allow me to add more information, make corrections, add literature or project details, delete an observation or duplicate it (e.g. where we have a single observation that actually covers more than one microhabitat etc.). 
 
-That's the full record editor — 25 new backend endpoints, plus a new page at /admin/records (add record_editor.html alongside your other page files, same as the others). A few things worth knowing about how it's built:
+That's the full record editor — 25 new backend endpoints, plus a new page at /admin/records (add record_editor.html alongside your other page files, same as the others).
+
+[record_editor.html](record_editor.html)
+
+A few things worth knowing about how it's built:
 
 The microhabitat-split workflow you described works like this: open the sample → Duplicate sample (creates a fresh copy) → edit the duplicate's microhabitat field → open the original observation → Duplicate observation → in the duplicate form, search for the new sample as the target, tick "also copy demographics and specimens" if relevant → done. Two originals stay untouched throughout.
 
