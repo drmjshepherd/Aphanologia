@@ -79,9 +79,12 @@
         .row-item { border-top: 1px solid #f1f3f5; padding: 10px 0; }
         .row-item:first-child { border-top: none; }
         .row-item-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-        .row-item-head .ri-main { font-size: 0.88rem; }
+        .row-item-head .ri-main { font-size: 0.88rem; color: #2d6a4f; text-decoration: underline; text-decoration-color: transparent; transition: text-decoration-color 0.12s; }
+        .row-item-head:hover .ri-main { text-decoration-color: #2d6a4f; }
         .row-item-head .ri-main .taxon-name { font-style: italic; color: #1b4332; }
         .row-item-head .ri-meta { font-size: 0.76rem; color: #6c757d; }
+        .row-item-head .ri-chevron { color: #adb5bd; font-weight: bold; margin-left: 8px; transition: transform 0.15s; display: inline-block; }
+        .row-item-head.expanded .ri-chevron { transform: rotate(90deg); color: #2d6a4f; }
         .row-item-body { display: none; margin-top: 10px; }
         .row-item-body.visible { display: block; }
         .no-items { color: #adb5bd; font-size: 0.85rem; font-style: italic; }
@@ -213,12 +216,28 @@
                 gate.style.display = 'none';
                 content.style.display = 'block';
                 renderSessionEdits();
+                openFromUrlIfPresent();
             } else {
                 gate.style.display = 'block';
                 content.style.display = 'none';
                 gate.textContent = currentUser
                     ? 'This tool is restricted to superusers.'
                     : 'Please sign in with a superuser account to use the record editor.';
+            }
+        }
+
+        // Arriving via a link like /admin/records?observation_id=WEB-12
+        // (e.g. the "Switch to editing" button on the read-only record
+        // viewer) opens that observation directly. ?event_id= opens a
+        // sample directly instead.
+        function openFromUrlIfPresent() {
+            const params = new URLSearchParams(window.location.search);
+            const obsId = params.get('observation_id');
+            const eventId = params.get('event_id');
+            if (obsId) {
+                openObservation(obsId);
+            } else if (eventId) {
+                openSample(eventId);
             }
         }
 
@@ -530,7 +549,7 @@
                 row.innerHTML = `
                     <div class="row-item-head">
                         <span class="ri-main"><span class="taxon-name">${o.taxon_name || o.taxonID}</span></span>
-                        <span class="ri-meta">${o.verification_status || ''}</span>
+                        <span><span class="ri-meta">${o.verification_status || ''}</span><span class="ri-chevron">&rsaquo;</span></span>
                     </div>
                 `;
                 row.querySelector('.row-item-head').addEventListener('click', () => openObservation(o.observationID));
@@ -562,8 +581,8 @@
             if (!currentSampleId) return;
             const payload = {
                 samplingLocation: document.getElementById('s-location').value || null,
-                decimalLatitude: parseFloatOrNull(document.getElementById('s-lat').value),
-                decimalLongitude: parseFloatOrNull(document.getElementById('s-lon').value),
+                decimalLatitude: document.getElementById('s-lat').value || null,
+                decimalLongitude: document.getElementById('s-lon').value || null,
                 coordinateuncertaintyinmeters: document.getElementById('s-coorduncert').value || null,
                 bngx: document.getElementById('s-bngx').value || null,
                 bngy: document.getElementById('s-bngy').value || null,
@@ -847,7 +866,15 @@
                 <div id="obsLitLinks"></div>
                 <div id="obsLitWidgetContainer"></div>
                 <div class="field-row" style="margin-top:6px;">
-                    <div class="field"><label>Type</label><input type="text" id="obsLitType" value="reference"></div>
+                    <div class="field">
+                        <label>Type</label>
+                        <select id="obsLitType">
+                            <option value="Identified using">Identified using</option>
+                            <option value="Determination confirmed in">Determination confirmed in</option>
+                            <option value="First published record in">First published record in</option>
+                            <option value="Discussed in">Discussed in</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="save-row">
                     <button type="button" class="secondary small" onclick="addObservationLiteratureLink()">Add reference</button>
@@ -1002,7 +1029,7 @@
         async function addObservationLiteratureLink() {
             if (!currentObservationId) return;
             if (!window.obsLitSelection) { setSaveStatus('obsLitStatus', 'Select a reference first.', 'error'); return; }
-            const payload = { litID: window.obsLitSelection.litID, type: document.getElementById('obsLitType').value || 'reference' };
+            const payload = { litID: window.obsLitSelection.litID, type: document.getElementById('obsLitType').value || 'Identified using' };
             setSaveStatus('obsLitStatus', 'Adding...', '');
             try {
                 const res = await fetch(`/api/v1/admin/observations/${encodeURIComponent(currentObservationId)}/literature-links`, {
@@ -1032,12 +1059,14 @@
             demographics.forEach(d => {
                 const row = document.createElement('div');
                 row.className = 'row-item';
-                const summary = [d.sex, d.lifestage, d.count ? `count: ${d.count}` : null].filter(Boolean).join(', ') || '(no details yet)';
+                const summary = [d.sex, d.lifestage, d.count ? `count: ${d.count}` : null].filter(Boolean).join(', ') || '(click to edit this group)';
                 row.innerHTML = `
-                    <div class="row-item-head"><span class="ri-main">${summary}</span><span class="ri-meta">${d.specimens.length} specimen(s)</span></div>
+                    <div class="row-item-head" id="demo-head-${d.demographicID}">
+                        <span class="ri-main">${summary}</span>
+                        <span><span class="ri-meta">${d.specimens.length} specimen(s)</span><span class="ri-chevron">&rsaquo;</span></span>
+                    </div>
                     <div class="row-item-body" id="demo-body-${d.demographicID}"></div>
                 `;
-                row.querySelector('.row-item-head').style.cursor = 'pointer';
                 row.querySelector('.row-item-head').addEventListener('click', () => toggleDemographicBody(d));
                 el.appendChild(row);
             });
@@ -1047,9 +1076,11 @@
             const body = document.getElementById(`demo-body-${d.demographicID}`);
             const isVisible = body.classList.contains('visible');
             document.querySelectorAll('.row-item-body.visible').forEach(b => b.classList.remove('visible'));
+            document.querySelectorAll('.row-item-head.expanded').forEach(h => h.classList.remove('expanded'));
             if (isVisible) return;
             body.innerHTML = renderDemographicForm(d);
             body.classList.add('visible');
+            document.getElementById(`demo-head-${d.demographicID}`).classList.add('expanded');
             populateSelect(`demo-sex-${d.demographicID}`, SEX_OPTIONS, d.sex);
             populateSelect(`demo-lifestage-${d.demographicID}`, LIFESTAGE_OPTIONS, d.lifestage);
             renderSpecimensList(d);
@@ -1177,10 +1208,9 @@
                 row.className = 'row-item';
                 const summary = [sp.specType, sp.specCount ? `count: ${sp.specCount}` : null, sp.specLocation].filter(Boolean).join(', ') || sp.specimenID;
                 row.innerHTML = `
-                    <div class="row-item-head"><span class="ri-main">${summary}</span></div>
+                    <div class="row-item-head" id="spec-head-${sp.specimenID}"><span class="ri-main">${summary}</span><span class="ri-chevron">&rsaquo;</span></div>
                     <div class="row-item-body" id="spec-body-${sp.specimenID}"></div>
                 `;
-                row.querySelector('.row-item-head').style.cursor = 'pointer';
                 row.querySelector('.row-item-head').addEventListener('click', () => toggleSpecimenBody(sp));
                 el.appendChild(row);
             });
@@ -1190,7 +1220,9 @@
             const body = document.getElementById(`spec-body-${sp.specimenID}`);
             const isVisible = body.classList.contains('visible');
             document.querySelectorAll('.row-item-body.visible').forEach(b => { if (b.id.startsWith('spec-body-')) b.classList.remove('visible'); });
+            document.querySelectorAll('.row-item-head.expanded').forEach(h => { if (h.id.startsWith('spec-head-')) h.classList.remove('expanded'); });
             if (isVisible) return;
+            document.getElementById(`spec-head-${sp.specimenID}`).classList.add('expanded');
             body.innerHTML = `
                 <div class="field-row">
                     <div class="field"><label>Count</label><input type="text" id="spec-count-${sp.specimenID}" value="${esc(sp.specCount)}"></div>
@@ -1308,7 +1340,7 @@
                 row.innerHTML = `
                     <div class="row-item-head">
                         <span class="ri-main">${o.samplingLocation || o.eventID}</span>
-                        <span class="ri-meta">${o.earliestDateCollected || ''} &middot; ${o.verification_status || ''}</span>
+                        <span><span class="ri-meta">${o.earliestDateCollected || ''} &middot; ${o.verification_status || ''}</span><span class="ri-chevron">&rsaquo;</span></span>
                     </div>
                 `;
                 row.addEventListener('click', () => openObservation(o.observationID));
