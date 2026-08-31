@@ -83,6 +83,12 @@
 
         .signin-note { color: #6c757d; font-size: 0.85rem; font-style: italic; }
         #edit-form { display: none; margin-top: 12px; border-top: 1px solid #f1f3f5; padding-top: 12px; }
+
+        .tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid #dee2e6; }
+        .tab-btn { background: none; border: none; color: #6c757d; padding: 8px 4px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; font-size: 0.95rem; }
+        .tab-btn.active { color: #1b4332; border-bottom-color: #1b4332; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
     </style>
 </head>
 <body>
@@ -95,11 +101,17 @@
     </div>
 
     <div id="page">
-        <h2>Literature</h2>
-        <p class="subtext">The reference library behind this database's identifications, synonymy decisions, and records.</p>
+        <h2>Literature &amp; Projects</h2>
+        <p class="subtext">The reference library and recording project catalogue behind this database's records.</p>
 
         <div id="global-status"></div>
 
+        <div class="tabs">
+            <button type="button" class="tab-btn active" data-tab="literature-tab" onclick="switchLitTab('literature-tab')">Literature</button>
+            <button type="button" class="tab-btn" data-tab="projects-tab" onclick="switchLitTab('projects-tab')">Projects</button>
+        </div>
+
+        <div id="literature-tab" class="tab-panel active">
         <div class="panel">
             <h2 style="font-size:1rem;">Find or add a reference</h2>
             <div id="lit-widget-container"></div>
@@ -202,6 +214,54 @@
                 </div>
             </div>
         </div>
+        </div>
+
+        <div id="projects-tab" class="tab-panel">
+        <div class="panel">
+            <h2 style="font-size:1rem;">Add a new project</h2>
+            <p class="subtext">For a formal survey, monitoring programme, or biological records centre bulk download that isn't catalogued yet.</p>
+            <div class="field-row">
+                <div class="field full"><label>Project name</label><input type="text" id="newProjName"></div>
+            </div>
+            <div class="field-row">
+                <div class="field">
+                    <label>Category</label>
+                    <select id="newProjCategory">
+                        <option value="Survey or monitoring programme">Survey or monitoring programme</option>
+                        <option value="Biological records centre bulk download">Biological records centre bulk download</option>
+                    </select>
+                </div>
+                <div class="field"><label>Website URL <span style="font-weight:normal; color:#868e96;">(optional)</span></label><input type="text" id="newProjUrl"></div>
+            </div>
+            <div class="field-row">
+                <div class="field full"><label>Description <span style="font-weight:normal; color:#868e96;">(optional)</span></label><textarea id="newProjDescription"></textarea></div>
+            </div>
+            <p class="signin-note" id="proj-add-signin-note" style="display:none;">Sign in with a contributor account to add new projects.</p>
+            <div class="save-row" id="proj-add-row">
+                <button type="button" onclick="createProject()">Add project</button>
+                <span class="save-status" id="newProjStatus"></span>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2 style="font-size:1rem;">Browse all projects</h2>
+            <div class="field full browse-search">
+                <input type="text" id="projBrowseSearch" placeholder="Filter by project name...">
+            </div>
+            <div id="projBrowseList">Loading&hellip;</div>
+            <div class="pagination">
+                <button type="button" class="secondary small" id="projBrowsePrev" onclick="changeProjBrowsePage(-1)">&larr; Previous</button>
+                <span id="projBrowsePageInfo"></span>
+                <button type="button" class="secondary small" id="projBrowseNext" onclick="changeProjBrowsePage(1)">Next &rarr;</button>
+            </div>
+        </div>
+
+        <div class="panel" id="proj-detail-panel" style="display:none;">
+            <div class="detail-ref" id="projDetailRef"></div>
+            <div class="detail-fields" id="projDetailFields"></div>
+            <div class="usage-badges" id="projUsageBadges"></div>
+        </div>
+        </div>
     </div>
 
     <script src="/static/js/literature_widget.js"></script>
@@ -230,6 +290,8 @@
         function applyPermissionUI() {
             document.getElementById('add-signin-note').style.display = isContributor ? 'none' : 'block';
             document.getElementById('lit-widget-container').style.display = isContributor ? 'block' : 'none';
+            document.getElementById('proj-add-signin-note').style.display = isContributor ? 'none' : 'block';
+            document.getElementById('proj-add-row').style.display = isContributor ? 'flex' : 'none';
             if (currentLitId) renderSuperuserVisibility();
         }
 
@@ -564,6 +626,126 @@
                 loadDetail(currentLitId);
             } catch (err) {
                 alert('Failed: ' + err);
+            }
+        }
+
+        // ---------- tabs ----------
+        function switchLitTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === tabId));
+        }
+
+        // ---------- projects: browse ----------
+        let projBrowseQuery = '';
+        let projBrowseOffset = 0;
+        const PROJ_BROWSE_LIMIT = 20;
+        let projBrowseTimer = null;
+
+        document.getElementById('projBrowseSearch').addEventListener('input', (e) => {
+            clearTimeout(projBrowseTimer);
+            projBrowseTimer = setTimeout(() => {
+                projBrowseQuery = e.target.value.trim();
+                projBrowseOffset = 0;
+                loadProjBrowseList();
+            }, 300);
+        });
+
+        function changeProjBrowsePage(direction) {
+            projBrowseOffset = Math.max(0, projBrowseOffset + direction * PROJ_BROWSE_LIMIT);
+            loadProjBrowseList();
+        }
+
+        async function loadProjBrowseList() {
+            const list = document.getElementById('projBrowseList');
+            list.innerHTML = 'Loading&hellip;';
+            try {
+                const params = new URLSearchParams({ limit: PROJ_BROWSE_LIMIT, offset: projBrowseOffset });
+                if (projBrowseQuery) params.set('q', projBrowseQuery);
+                const res = await fetch(`/api/v1/projects?${params}`);
+                const data = await res.json();
+                if (data.results.length === 0) {
+                    list.innerHTML = '<p class="signin-note">No matching projects.</p>';
+                } else {
+                    list.innerHTML = '';
+                    data.results.forEach(p => {
+                        const row = document.createElement('div');
+                        row.className = 'lit-row';
+                        row.innerHTML = `
+                            <div class="lit-ref">${p.project_name}</div>
+                            <div class="lit-id">${p.project_category}</div>
+                        `;
+                        row.addEventListener('click', () => loadProjectDetail(p.project_id));
+                        list.appendChild(row);
+                    });
+                }
+                const from = data.total === 0 ? 0 : projBrowseOffset + 1;
+                const to = Math.min(projBrowseOffset + PROJ_BROWSE_LIMIT, data.total);
+                document.getElementById('projBrowsePageInfo').textContent = `${from}-${to} of ${data.total}`;
+                document.getElementById('projBrowsePrev').disabled = projBrowseOffset === 0;
+                document.getElementById('projBrowseNext').disabled = to >= data.total;
+            } catch (err) {
+                list.innerHTML = '<p class="signin-note">Could not load projects.</p>';
+            }
+        }
+        loadProjBrowseList();
+
+        // ---------- projects: detail ----------
+        async function loadProjectDetail(projectId) {
+            try {
+                const res = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}`);
+                if (!res.ok) { alert('Could not load that project.'); return; }
+                const data = await res.json();
+                const entry = data.entry;
+
+                document.getElementById('projDetailRef').textContent = entry.project_name;
+                const fieldRows = [
+                    ['Category', entry.project_category],
+                    ['Website', entry.website_url ? `<a href="${entry.website_url}" target="_blank" rel="noopener">${entry.website_url}</a>` : null],
+                    ['Description', entry.description]
+                ].filter(([, v]) => v);
+                document.getElementById('projDetailFields').innerHTML = fieldRows.map(([label, val]) => `<b>${label}:</b> ${val}`).join('<br>');
+                document.getElementById('projUsageBadges').innerHTML =
+                    `<span class="usage-badge ${data.usage.samples === 0 ? 'zero' : ''}">${data.usage.samples} sample(s)</span>`;
+
+                document.getElementById('proj-detail-panel').style.display = 'block';
+                document.getElementById('proj-detail-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (err) {
+                alert('Could not load that project.');
+            }
+        }
+
+        // ---------- projects: add new ----------
+        async function createProject() {
+            const payload = {
+                project_name: document.getElementById('newProjName').value,
+                project_category: document.getElementById('newProjCategory').value,
+                website_url: document.getElementById('newProjUrl').value || null,
+                description: document.getElementById('newProjDescription').value || null
+            };
+            if (!payload.project_name.trim()) {
+                setSaveStatus('newProjStatus', 'Project name is required.', 'error');
+                return;
+            }
+            setSaveStatus('newProjStatus', 'Adding...', '');
+            try {
+                const res = await fetch('/api/v1/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('newProjStatus', data.detail || 'Could not add project.', 'error');
+                    return;
+                }
+                setSaveStatus('newProjStatus', 'Added.', 'success');
+                document.getElementById('newProjName').value = '';
+                document.getElementById('newProjUrl').value = '';
+                document.getElementById('newProjDescription').value = '';
+                loadProjBrowseList();
+                loadProjectDetail(data.project_id);
+            } catch (err) {
+                setSaveStatus('newProjStatus', 'Failed: ' + err, 'error');
             }
         }
     </script>
