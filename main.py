@@ -1417,7 +1417,7 @@ def _batch_validate(samples, observations, demographics, specimens):
 
     sample_refs = {}
     for s in samples:
-        ref = (s.get("Sample Ref*") or "").strip()
+        ref = str(s.get("Sample Ref*") if s.get("Sample Ref*") is not None else "").strip()
         if not ref:
             errors.append({"sheet": "Samples", "row": s["_row"], "message": "Sample Ref is required."})
             continue
@@ -1431,9 +1431,9 @@ def _batch_validate(samples, observations, demographics, specimens):
 
     observation_refs = {}
     for o in observations:
-        obs_ref = (o.get("Observation Ref*") or "").strip()
-        sample_ref = (o.get("Sample Ref*") or "").strip()
-        species = (o.get("Species*") or "").strip()
+        obs_ref = str(o.get("Observation Ref*") if o.get("Observation Ref*") is not None else "").strip()
+        sample_ref = str(o.get("Sample Ref*") if o.get("Sample Ref*") is not None else "").strip()
+        species = str(o.get("Species*") if o.get("Species*") is not None else "").strip()
         if not obs_ref:
             errors.append({"sheet": "Observations", "row": o["_row"], "message": "Observation Ref is required."})
         elif obs_ref in observation_refs:
@@ -1452,8 +1452,8 @@ def _batch_validate(samples, observations, demographics, specimens):
 
     demographic_refs = {}
     for d in demographics:
-        demo_ref = (d.get("Demographic Ref*") or "").strip()
-        obs_ref = (d.get("Observation Ref*") or "").strip()
+        demo_ref = str(d.get("Demographic Ref*") if d.get("Demographic Ref*") is not None else "").strip()
+        obs_ref = str(d.get("Observation Ref*") if d.get("Observation Ref*") is not None else "").strip()
         if not demo_ref:
             errors.append({"sheet": "Demographics", "row": d["_row"], "message": "Demographic Ref is required."})
         elif demo_ref in demographic_refs:
@@ -1466,7 +1466,7 @@ def _batch_validate(samples, observations, demographics, specimens):
             errors.append({"sheet": "Demographics", "row": d["_row"], "message": f"Observation Ref '{obs_ref}' does not match any row on the Observations sheet."})
 
     for sp in specimens:
-        demo_ref = (sp.get("Demographic Ref*") or "").strip()
+        demo_ref = str(sp.get("Demographic Ref*") if sp.get("Demographic Ref*") is not None else "").strip()
         if not demo_ref:
             errors.append({"sheet": "Specimens", "row": sp["_row"], "message": "Demographic Ref is required."})
         elif demo_ref not in demographic_refs:
@@ -1620,7 +1620,7 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for s in samples:
             cursor.execute("SELECT nextval('web_eventid_seq');")
             new_event_id = f"WEB-{cursor.fetchone()['nextval']}"
-            sample_ref_to_event_id[(s.get("Sample Ref*") or "").strip()] = new_event_id
+            sample_ref_to_event_id[str(s.get("Sample Ref*") if s.get("Sample Ref*") is not None else "").strip()] = new_event_id
 
             source_category = s.get("sourceCategory") or None
             data_source_summary = source_category
@@ -1655,9 +1655,9 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for o in observations:
             cursor.execute("SELECT nextval('web_observationid_seq');")
             new_obs_id = f"WEB-{cursor.fetchone()['nextval']}"
-            observation_ref_to_id[(o.get("Observation Ref*") or "").strip()] = new_obs_id
+            observation_ref_to_id[str(o.get("Observation Ref*") if o.get("Observation Ref*") is not None else "").strip()] = new_obs_id
 
-            event_id = sample_ref_to_event_id[(o.get("Sample Ref*") or "").strip()]
+            event_id = sample_ref_to_event_id[str(o.get("Sample Ref*") if o.get("Sample Ref*") is not None else "").strip()]
             resolved = taxon_resolution.get(o["_row"], {"taxon_id": None, "proposed_name": None})
 
             cursor.execute("""
@@ -1695,8 +1695,8 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for d in demographics:
             cursor.execute("SELECT nextval('web_demographicid_seq');")
             new_demo_id = f"WEB-{cursor.fetchone()['nextval']}"
-            demographic_ref_to_id[(d.get("Demographic Ref*") or "").strip()] = new_demo_id
-            obs_id = observation_ref_to_id[(d.get("Observation Ref*") or "").strip()]
+            demographic_ref_to_id[str(d.get("Demographic Ref*") if d.get("Demographic Ref*") is not None else "").strip()] = new_demo_id
+            obs_id = observation_ref_to_id[str(d.get("Observation Ref*") if d.get("Observation Ref*") is not None else "").strip()]
 
             cursor.execute("""
                 INSERT INTO observation_demographics (
@@ -1712,7 +1712,7 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for sp in specimens:
             cursor.execute("SELECT nextval('web_specimenid_seq');")
             new_spec_id = f"WEB-{cursor.fetchone()['nextval']}"
-            demo_id = demographic_ref_to_id[(sp.get("Demographic Ref*") or "").strip()]
+            demo_id = demographic_ref_to_id[str(sp.get("Demographic Ref*") if sp.get("Demographic Ref*") is not None else "").strip()]
 
             cursor.execute("""
                 INSERT INTO specimens (
@@ -4586,3 +4586,4 @@ def get_live_schema(user: dict = Depends(require_superuser)):
     finally:
         cursor.close()
         conn.close()
+
