@@ -807,6 +807,16 @@ A page was created to allow users to view and select the literature available on
 
 ## Bulk upload using template generation
 
+A facility was developed to allow contributors and superusers to upload bulk records based on a template downloaded from the system - this would provide cross validation to ensure uploads met the schema design (samples -> observations -> demographics -> specimens) and would flag any taxon names used that failed to match anything on the database, keeping them as "pending review" but allowing their upload.
+
+This systems doesn't allow upload of observations to existing samples. Only new samples may be committed, which simplifies the download step (no need to expose existing samples as a second reference list).
+
+Whole-batch atomic commit — one transaction, everything or nothing - the entire upload is rejected if it fails to meet the datbase validataion standard - puts the onus on the uploader to get it right.
+
+Unmatched taxon names never block the upload — this simplifies the design rather than complicate it. Instead of a whole new staging table and a second review workflow, an unmatched name just leaves taxonID blank on that observation and stores the typed text in a new `proposed_taxon_name column` — then it surfaces as a filter on the existing Review Queue and gets resolved using the existing taxon picker and "Add new taxon" flow. This required one small migration, one filter added to an existing page, and no parallel system to maintain.
+
+It was decided that superuser uploads should skip review (not taxonomic review, though), and all levels (samples, observations, demongraphics, specimens) of upload should be processed in a single upload, since this data is usually available at upload time, and avoids later fiddly matching of later information to specimens (althought this is possible through a migrate, i suppose).
+
 Template generation (GET /api/v1/batch/template) — builds a real multi-sheet .xlsx on the fly: Instructions, Samples, Observations, optionally Demographics and Specimens, and a Taxon Lookup reference sheet. Sample/Observation/Demographic Ref columns are proper Excel Tables with dropdown validation pointing at each other, so the cross-sheet linking is genuinely robust in Excel, not just theoretically so.
 
 Validate → Commit, two separate endpoints as planned, with the commit endpoint re-running the exact same validation before writing anything.
@@ -817,3 +827,11 @@ Assigning a taxon to a placeholder observation (via the Record Editor or the new
 Review Queue got a new "Unresolved taxa" section — lists every observation with an unmatched name regardless of verification status (important since superuser batch uploads are auto-verified but can still have genuinely unresolved taxa), with inline "assign existing taxon" search and a "create as new taxon" link that pre-fills the Taxonomy Editor's add-new form via the same ?new_taxon_name= pattern already used elsewhere for deep links.
 
 One scope note, consistent with keeping this simple: the Samples sheet captures sourceCategory as free text/dropdown rather than a structured literature/project ID link (picking a specific existing literature reference by ID in a spreadsheet cell isn't practical) — if a batch-uploaded sample needs a proper linked reference, that's a quick follow-up in the Record Editor's already-built sample literature/project panel.
+
+A further set of edits was required to pre-populate donwloaded tables with literature links or information on the project, recording event, museum collection/institutional collection, personal collection or other event where the uploaded records would come from.  This removes the need to individually update each sample with this information after upload.
+
+The addition of a placeholder name for taxon names not present in the database was included using:
+
+[Migration-15batch_upload_taxon_placeholder.sql](Migration-15batch_upload_taxon_placeholder.sql)
+
+
