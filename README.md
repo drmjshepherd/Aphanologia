@@ -800,6 +800,11 @@ New /records/view page + backend, reachable from a "View Record →" link added 
 
 [record_viewer.html](record_viewer.html)
 
+## Literature viewer for users
+A page was created to allow users to view and select the literature available on the database. This was later updated to include a tab to view and (if user privileges allow) create project infomration, too.
+
+[literature.html](literature.html)
+
 ## Bulk upload using template generation
 
 Template generation (GET /api/v1/batch/template) — builds a real multi-sheet .xlsx on the fly: Instructions, Samples, Observations, optionally Demographics and Specimens, and a Taxon Lookup reference sheet. Sample/Observation/Demographic Ref columns are proper Excel Tables with dropdown validation pointing at each other, so the cross-sheet linking is genuinely robust in Excel, not just theoretically so.
