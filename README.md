@@ -834,4 +834,8 @@ The addition of a placeholder name for taxon names not present in the database w
 
 [Migration-15batch_upload_taxon_placeholder.sql](Migration-15batch_upload_taxon_placeholder.sql)
 
+Edits were also made to [main.py](main.py), [review.html](review.html), [taxonomy_editor](taxonomy_editor), [landing.html](landing.html) and [submit.html](submit.html)
 
+And a new page created:
+
+[batch_upload.html](batch_upload.html)
