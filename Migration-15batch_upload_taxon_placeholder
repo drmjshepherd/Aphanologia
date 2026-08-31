@@ -1,0 +1,30 @@
+-- Migration-15: batch_upload_taxon_placeholder
+-- Adds the one column needed to support batch upload's taxon
+-- placeholder workflow: when an uploaded observation's species name
+-- doesn't exactly match anything in the taxonomy table, the
+-- observation is still created (never blocked) with taxonID left
+-- NULL and the as-typed name preserved here, so a superuser can
+-- later resolve it - either by assigning an existing taxon (a typo)
+-- or by creating a new one (a genuine new record) - using the
+-- taxonomy editor and record editor that already exist. No new
+-- table, no new review workflow: this is deliberately the smallest
+-- change that makes the existing Review Queue able to surface these.
+
+BEGIN;
+
+ALTER TABLE observations
+    ADD COLUMN IF NOT EXISTS proposed_taxon_name text;
+
+COMMENT ON COLUMN observations.proposed_taxon_name IS
+    'Set only when taxonID is NULL because a batch-uploaded species name did not exactly match any existing taxon. Cleared once a superuser resolves it (assigns an existing taxon or creates a new one).';
+
+-- Fast "show me everything awaiting taxon resolution" lookups for
+-- the Review Queue's new filter.
+CREATE INDEX IF NOT EXISTS idx_observations_proposed_taxon_name
+    ON observations (proposed_taxon_name)
+    WHERE proposed_taxon_name IS NOT NULL;
+
+COMMIT;
+
+-- Rollback (manual, if ever needed):
+-- ALTER TABLE observations DROP COLUMN IF EXISTS proposed_taxon_name;
