@@ -761,7 +761,7 @@
             const panel = document.getElementById('observation-panel');
             panel.innerHTML = `
                 <h2>Observation: <span class="taxon-name" style="font-style:italic;">${o.taxon_name || o.taxonID}</span></h2>
-                <p class="subtext">observationID: ${o.observationID} &middot; sample: ${o.eventID} (${o.sample_location || ''}) &middot; entered by ${o.entered_by || 'unknown'}</p>
+                <p class="subtext">observationID: ${o.observationID} &middot; sample: <a href="#" onclick="openSample('${o.eventID}'); return false;" style="color:#2d6a4f; font-weight:600; text-decoration:underline;">${o.eventID}</a> (${o.sample_location || ''}) &middot; entered by ${o.entered_by || 'unknown'}</p>
 
                 <div class="verification-note">
                     Current status: <b>${o.verification_status || 'unverified'}</b>${o.verified_by ? ' by ' + o.verified_by : ''}.
