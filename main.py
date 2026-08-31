@@ -1,10 +1,18 @@
-from fastapi import FastAPI, HTTPException, Query, Path, Depends
-from fastapi.responses import FileResponse
-from typing import Optional
+from fastapi import FastAPI, HTTPException, Query, Path, Depends, UploadFile, File
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from typing import Optional, List
 from database import get_db_connection
 import json
 import re
 import os
+import io
+from openpyxl import Workbook, load_workbook
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
+from openpyxl.comments import Comment
 from dotenv import load_dotenv
 from starlette.middleware.sessions import SessionMiddleware
 from authlib.integrations.starlette_client import OAuth
@@ -25,6 +33,13 @@ app = FastAPI(
 # visitor can't edit their own cookie to pretend to be someone else,
 # since they don't know the key used to sign it.
 app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET_KEY"])
+
+# Serves shared front-end assets used across multiple pages - e.g.
+# static/js/literature_widget.js, the embeddable "find or add a
+# literature reference" component used by the taxonomy editor and
+# (eventually) the sample submission form, so that widget only has
+# to be written and maintained once.
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Sets up the connection to Google's sign-in system using the
 # credentials from .env. server_metadata_url points Authlib at
@@ -88,7 +103,19 @@ def serve_taxonomy():
 def serve_submit():
     return FileResponse("submit.html")
 
-@app.get("/schema", response_class=FileResponse)
+@app.get("/literature", response_class=FileResponse)
+def serve_literature():
+    return FileResponse("literature.html")
+
+@app.get("/records/view", response_class=FileResponse)
+def serve_record_viewer():
+    return FileResponse("record_viewer.html")
+
+@app.get("/batch/upload", response_class=FileResponse)
+def serve_batch_upload():
+    return FileResponse("batch_upload.html")
+
+@app.get("/admin/schema", response_class=FileResponse)
 def serve_schema_viewer():
     return FileResponse("schema.html")
 
@@ -99,6 +126,10 @@ def serve_review():
 @app.get("/admin/taxonomy", response_class=FileResponse)
 def serve_taxonomy_editor():
     return FileResponse("taxonomy_editor.html")
+
+@app.get("/admin/records", response_class=FileResponse)
+def serve_record_editor():
+    return FileResponse("record_editor.html")
 
 
 #==========================================================
@@ -333,12 +364,18 @@ def get_taxonomy_detail(taxon_id: str = Path(..., description="The taxonID to fe
 @app.get("/api/v1/taxonomy/search")
 def search_taxonomy(
     q: str = Query(..., min_length=3, description="Search text (minimum 3 characters). Separate alternative searches with OR; space-separated words within a search are combined with AND."),
-    limit: int = Query(25, ge=1, le=50, description="Maximum number of matches to return")
+    limit: int = Query(25, ge=1, le=50, description="Maximum number of matches to return"),
+    valid_only: bool = Query(False, description="If true, only return taxa with taxonomicStatus = 'accepted' (excludes synonyms, misapplied and doubtful names)")
 ):
     """
     Searches every taxon name in the database in one go - accepted
     names, doubtful names, misapplied names, and synonyms all live
-    in the same taxonomy table, so this naturally covers all of them.
+    in the same taxonomy table, so this naturally covers all of them
+    (unless valid_only excludes anything but accepted names - used by
+    the "Only allow valid taxa" toggle on the sample submission form,
+    since working through literature often means recording a species
+    under a name the DB itself has since synonymised, which
+    valid_only would otherwise hide).
 
     Two layers of matching:
       1. The existing boolean logic - split on 'OR', AND together the
@@ -382,6 +419,9 @@ def search_taxonomy(
         # catches typos the exact boolean matching above would miss.
         where_sql = f"({boolean_where_sql}) OR (\"scientificName\" %% %s)"
         params.append(q)
+
+        if valid_only:
+            where_sql = f"({where_sql}) AND \"taxonomicStatus\" = 'accepted'"
 
         # Ranking: exact prefix match first, then trigram similarity,
         # then alphabetical as a final tiebreaker
@@ -499,8 +539,9 @@ def get_taxon_literature(taxon_id: str = Path(..., description="The taxonID to f
     Returns the literature references linked to a taxon via
     taxonomy_literature_junction, grouped by relationship type
     (taxonomy/synonymy source, name first published in, as used in,
-    presence in UK from), each formatted as a single readable citation
-    string with a clickable link where sourceURL is available.
+    presence in UK from, identification key), each formatted as a
+    single readable citation string with a clickable link where
+    sourceURL is available.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -532,7 +573,8 @@ def get_taxon_literature(taxon_id: str = Path(..., description="The taxonID to f
             "Taxonomy or synonymy from": [],
             "Name first published in": [],
             "As used in": [],
-            "Presence in UK from": []
+            "Presence in UK from": [],
+            "Identification Key": []
         }
         for row in rows:
             rel_type = row["relationship_type"]
@@ -705,6 +747,95 @@ def get_observations_geojson(
     finally:
         cursor.close()
         conn.close()
+
+
+@app.get("/api/v1/records/view/{observation_id}")
+def get_public_record_view(observation_id: str):
+    """
+    Public, read-only view of a full record: sample, observation,
+    demographic groups and their specimens, and literature links at
+    both levels - powers /records/view, reachable from the map
+    popup's "View Record" link. Not gated behind login; everything
+    returned here is the kind of thing a specimen label or a GBIF
+    occurrence page would already show.
+
+    Note: this does not currently redact anything based on
+    samples.datarestricted - if some samples need coordinates or
+    other details withheld from the public view for sensitive-species
+    reasons, that's a deliberate follow-up worth designing rather
+    than assuming here.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT o."observationID", o."eventID", o."taxonID", t."scientificName" AS taxon_name,
+                   t."scientificnameAuthorship" AS taxon_authorship, t."taxonrank" AS taxon_rank,
+                   o."identifiedBy", o."identificationVerificationStatus", o."identificationRemarks",
+                   o."collectionID", o."catalogNumber", o."basisOfRecord", o."idTechnique",
+                   o."idText[free_text]" AS "idText", o."occurrenceRemarks",
+                   o.verification_status, o.verified_by, o.verified_date,
+                   o.share_with_nbn, o.share_with_gbif, o.coordinate_uncertainty_meters,
+                   o.entered_by, o.entered_at
+            FROM observations o
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            WHERE o."observationID" = %s;
+        """, (observation_id,))
+        obs = cursor.fetchone()
+        if not obs:
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+
+        cursor.execute('SELECT * FROM samples WHERE "eventID" = %s;', (obs["eventID"],))
+        sample = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT * FROM observation_demographics WHERE "observationID" = %s ORDER BY "demographicID";
+        """, (observation_id,))
+        demographics = cursor.fetchall()
+        for d in demographics:
+            cursor.execute('SELECT * FROM specimens WHERE "demographicID" = %s ORDER BY "specimenID";', (d["demographicID"],))
+            d["specimens"] = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT j.type, CONCAT_WS(', ', l."authorName", l."yearPublished", l."articleTitle", l."publicationTitle") AS formatted_ref, l."sourceURL"
+            FROM observation_literature_junction j
+            JOIN literature l ON j."litID" = l."litID"
+            WHERE j."observationID" = %s;
+        """, (observation_id,))
+        obs_literature = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT j."Type" AS type, CONCAT_WS(', ', l."authorName", l."yearPublished", l."articleTitle", l."publicationTitle") AS formatted_ref, l."sourceURL"
+            FROM sample_literature_junction j
+            JOIN literature l ON j."litID" = l."litID"
+            WHERE j."eventID" = %s;
+        """, (obs["eventID"],))
+        sample_literature = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT p.project_name, j.type
+            FROM sample_project_junction j
+            JOIN recording_projects p ON j.project_id = p.project_id
+            WHERE j."eventID" = %s;
+        """, (obs["eventID"],))
+        sample_projects = cursor.fetchall()
+
+        return {
+            "observation": obs,
+            "sample": sample,
+            "demographics": demographics,
+            "observation_literature": obs_literature,
+            "sample_literature": sample_literature,
+            "sample_projects": sample_projects
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
         
 #==========================================================
 # SUBMISSION ENDPOINTS
@@ -831,6 +962,32 @@ class TaxonomyEditSubmission(BaseModel):
     notes: Optional[str] = None  # reason for the edit - stored in admin_activity_log, not on the taxon itself
 
 
+class TaxonLiteratureLinkSubmission(BaseModel):
+    """
+    Links one literature reference to one taxon, via
+    taxonomy_literature_junction, tagged with which of the five
+    relationship types the public taxonomy page groups citations into
+    (see get_taxon_literature) - including "Identification Key" as
+    its own category, since a reference recording a taxonomic or
+    synonymy decision (what's synonymised with what, which genus a
+    species now sits in) is a different kind of thing from a
+    reference that's usable to identify the taxon, and conflating the
+    two under "Taxonomy or synonymy from" was misleading. There is no
+    separate is_identification_key flag any more - it's derived
+    server-side from Type == "Identification Key" - so the two can
+    never disagree. key_scope_rank is still free-standing on this
+    model: it's only meaningful when Type is "Identification Key",
+    and records which rank the key covers (e.g. a species-level
+    reference might actually be a key to the whole family).
+    """
+    litID: str
+    Type: str  # one of VALID_TAXON_LITERATURE_TYPES below
+    key_scope_rank: Optional[str] = None
+    online_resource_url: Optional[str] = None
+    access_notes: Optional[str] = None
+    notes: Optional[str] = None  # reason, for the activity log
+
+
 class TaxonomyCreateSubmission(BaseModel):
     scientificName: str
     scientificnameAuthorship: Optional[str] = None
@@ -840,6 +997,113 @@ class TaxonomyCreateSubmission(BaseModel):
     taxonRemarks: Optional[str] = None
     parentNameUsageID: Optional[str] = None    # set this for a new taxon in the hierarchy
     acceptedNameUsageID: Optional[str] = None  # OR set this for a new synonym of an existing taxon (not both)
+    literature_links: Optional[List[TaxonLiteratureLinkSubmission]] = None  # attach references at creation time
+    notes: Optional[str] = None
+
+
+# ----------------------------------------------------------------
+# Record editor models (samples / observations / demographics /
+# specimens) - all full-replace edit shapes, same convention as
+# TaxonomyEditSubmission: the form always sends every editable
+# field, so there's never ambiguity between "not sent" and
+# "deliberately cleared".
+# ----------------------------------------------------------------
+
+class SampleEditSubmission(BaseModel):
+    samplingLocation: Optional[str] = None
+    decimalLatitude: Optional[str] = None   # stored as text in the DB, not numeric - kept as str so the diff never falsely flags an unchanged value
+    decimalLongitude: Optional[str] = None  # same
+    coordinateuncertaintyinmeters: Optional[str] = None
+    bngx: Optional[str] = None
+    bngy: Optional[str] = None
+    gridRef: Optional[str] = None
+    earliestDateCollected: Optional[str] = None
+    latestDateCollected: Optional[str] = None
+    habitat: Optional[str] = None
+    microhabitat: Optional[str] = None
+    SHADe: Optional[str] = None
+    samplingProtocol: Optional[str] = None
+    samplesizeValue: Optional[float] = None
+    samplesizeUnit: Optional[str] = None
+    recordedBy: Optional[str] = None
+    eventRemarks: Optional[str] = None
+    datarestricted: Optional[str] = None
+    licenceHolder: Optional[str] = None
+    dataSource: Optional[str] = None  # maps to "dataSource[free text]"
+    notes: Optional[str] = None  # reason, for the activity log
+
+
+class SampleDuplicateSubmission(BaseModel):
+    notes: Optional[str] = None
+
+
+class SampleLiteratureLinkSubmission(BaseModel):
+    litID: str
+    Type: Optional[str] = "source of record"
+    notes: Optional[str] = None
+
+
+class SampleProjectLinkSubmission(BaseModel):
+    project_id: int
+    type: Optional[str] = "source of record"
+    notes: Optional[str] = None
+
+
+class ObservationEditSubmission(BaseModel):
+    eventID: Optional[str] = None  # which sample this belongs to - change to re-home it (e.g. after a microhabitat split)
+    taxonID: Optional[str] = None
+    identifiedBy: Optional[str] = None
+    identificationVerificationStatus: Optional[str] = None
+    identificationRemarks: Optional[str] = None
+    collectionID: Optional[str] = None
+    catalogNumber: Optional[str] = None
+    basisOfRecord: Optional[str] = None
+    idTechnique: Optional[str] = None
+    litID: Optional[str] = None  # the single "primary reference" field already on observations
+    idText: Optional[str] = None  # maps to "idText[free_text]"
+    occurrenceRemarks: Optional[str] = None
+    share_with_nbn: Optional[bool] = True
+    share_with_gbif: Optional[bool] = True
+    coordinate_uncertainty_meters: Optional[int] = None
+    notes: Optional[str] = None  # reason, for the activity log
+    # verification_status / verified_by / verified_date / verification_notes
+    # are deliberately NOT editable here - they're managed through the
+    # audited /review workflow (submit_verification_action) so every
+    # change to them stays in observation_verification_actions.
+
+
+class ObservationDuplicateSubmission(BaseModel):
+    new_event_id: Optional[str] = None   # defaults to the same sample if omitted
+    new_taxon_id: Optional[str] = None   # defaults to the same taxon if omitted
+    copy_demographics: bool = False      # also deep-copy this observation's demographics (and their specimens)
+    notes: Optional[str] = None
+
+
+class ObservationLiteratureLinkSubmission(BaseModel):
+    litID: str
+    type: Optional[str] = "Identified using"  # one of VALID_OBSERVATION_LITERATURE_TYPES below
+    notes: Optional[str] = None
+
+
+class DemographicEditSubmission(BaseModel):
+    sex: Optional[str] = None
+    lifestage: Optional[str] = None
+    count: Optional[str] = None
+    density: Optional[str] = None
+    densityUnit: Optional[str] = None
+    minCount: Optional[str] = None
+    maxCount: Optional[str] = None
+    countDescription: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SpecimenEditSubmission(BaseModel):
+    specCount: Optional[str] = None
+    specLocation: Optional[str] = None
+    specRef: Optional[str] = None
+    specPreservation: Optional[str] = None
+    specType: Optional[str] = None
+    specComments: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -933,6 +1197,557 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
 
 
 # ==========================================================
+# BATCH UPLOAD (contributor - superusers additionally skip review)
+# ==========================================================
+# Lets a contributor download a multi-sheet Excel template, fill in
+# a whole batch of new samples/observations (and optionally
+# demographics/specimens) offline, and upload it back. New samples
+# only - see the architecture notes for why. Whole-batch atomic: the
+# entire upload succeeds together or nothing is written. A species
+# name that doesn't exactly match anything in the taxonomy table
+# never blocks the upload - the observation is still created with
+# taxonID left NULL and the typed name preserved in
+# proposed_taxon_name, for a superuser to resolve later via the
+# Review Queue, using the taxonomy editor's existing tools.
+
+BATCH_MAX_TEMPLATE_ROWS = 500  # generous fixed size for dropdown source ranges - simple and robust at single-batch scale
+
+BATCH_SAMPLE_HEADERS = [
+    "Sample Ref*", "samplingLocation", "decimalLatitude", "decimalLongitude",
+    "coordinateUncertaintyInMeters", "earliestDateCollected", "latestDateCollected",
+    "habitat", "microhabitat", "SHADe", "samplingProtocol", "recordedBy", "eventRemarks",
+    "sourceCategory", "sourceOtherDetail"
+]
+BATCH_OBSERVATION_HEADERS = [
+    "Observation Ref*", "Sample Ref*", "Species*", "Species found?",
+    "identifiedBy", "identificationVerificationStatus", "identificationRemarks",
+    "basisOfRecord", "idTechnique", "idText"
+]
+BATCH_DEMOGRAPHIC_HEADERS = [
+    "Demographic Ref*", "Observation Ref*", "sex", "lifestage", "count",
+    "density", "densityUnit", "minCount", "maxCount", "countDescription"
+]
+BATCH_SPECIMEN_HEADERS = [
+    "Demographic Ref*", "specCount", "specLocation", "specRef",
+    "specPreservation", "specType", "specComments"
+]
+BATCH_SOURCE_CATEGORIES = [
+    "Personal collection", "Formal project or survey", "Published literature",
+    "Museum or institutional collection", "Recording event", "Other"
+]
+BATCH_SEX_OPTIONS = ["male", "female", "undetermined", "mixed"]
+BATCH_LIFESTAGE_OPTIONS = [
+    "egg", "prolarva", "larva", "protonymph", "deutonymph", "tritonymph",
+    "nymph", "juvenile", "adult", "dead remains", "undetermined", "sign", "gall"
+]
+
+_BATCH_HEADER_FILL = PatternFill(start_color="1B4332", end_color="1B4332", fill_type="solid")
+_BATCH_HEADER_FONT = Font(color="FFFFFF", bold=True)
+_BATCH_REQUIRED_FONT = Font(color="FFFFFF", bold=True, italic=True)
+
+
+def _batch_style_header_row(ws, headers):
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = _BATCH_HEADER_FILL
+        cell.font = _BATCH_REQUIRED_FONT if header.endswith("*") else _BATCH_HEADER_FONT
+    ws.freeze_panes = "A2"
+    for col_idx, header in enumerate(headers, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = max(14, min(32, len(header) + 4))
+
+
+def _batch_add_table(ws, headers, table_name):
+    last_col = get_column_letter(len(headers))
+    ref = f"A1:{last_col}{BATCH_MAX_TEMPLATE_ROWS + 1}"
+    table = Table(displayName=table_name, ref=ref)
+    table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    ws.add_table(table)
+
+
+def _batch_add_dropdown(ws, col_letter, source_formula, first_row=2, last_row=None):
+    last_row = last_row or (BATCH_MAX_TEMPLATE_ROWS + 1)
+    dv = DataValidation(type="list", formula1=source_formula, allow_blank=True, showDropDown=False)
+    dv.error = "Please choose a value from the dropdown list."
+    dv.errorTitle = "Invalid entry"
+    ws.add_data_validation(dv)
+    dv.add(f"{col_letter}{first_row}:{col_letter}{last_row}")
+
+
+def _build_batch_template(include_demographics: bool, include_specimens: bool, taxa: list):
+    """
+    Builds the downloadable multi-sheet workbook. taxa is a list of
+    dicts (taxon_id, scientific_name, authorship, rank, status) for
+    the read-only Taxon Lookup reference sheet.
+    """
+    include_specimens = include_specimens and include_demographics  # specimens need demographics to attach to
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    ws_instr = wb.create_sheet("Instructions")
+    ws_instr.column_dimensions["A"].width = 100
+    instructions = [
+        "Aphanologia batch upload template",
+        "",
+        "1. Fill in the Samples sheet first - one row per sampling event. Give each one a short, unique 'Sample Ref' (e.g. 'Site A visit 1') - this is just for linking rows within this file, it is not stored in the database.",
+        "2. Fill in the Observations sheet - one row per species record. Pick the Sample Ref from the dropdown. Type the species name as accurately as you can; the 'Species found?' column will tell you if it matches something already in the database.",
+    ]
+    if include_demographics:
+        instructions.append("3. If you have demographic detail (sex/lifestage/counts), fill in the Demographics sheet, picking the Observation Ref from the dropdown.")
+    if include_specimens:
+        instructions.append("4. If you have individual specimen records, fill in the Specimens sheet, picking the Demographic Ref from the dropdown.")
+    instructions += [
+        "5. Species names that don't match anything in the Taxon Lookup sheet are NOT rejected - they'll be queued for a superuser to review as a possible new record, once you upload.",
+        "6. Save the file and upload it on the Batch Upload page. You'll see a validation report before anything is saved to the database.",
+        "7. The whole upload succeeds or fails together - if any row has a structural problem (e.g. a Sample Ref that doesn't match anything on the Samples sheet), fix it and re-upload; nothing partial gets saved.",
+    ]
+    for i, line in enumerate(instructions, start=1):
+        ws_instr.cell(row=i, column=1, value=line)
+    ws_instr["A1"].font = Font(bold=True, size=14)
+
+    ws_samples = wb.create_sheet("Samples")
+    _batch_style_header_row(ws_samples, BATCH_SAMPLE_HEADERS)
+    _batch_add_table(ws_samples, BATCH_SAMPLE_HEADERS, "SamplesTable")
+    _batch_add_dropdown(ws_samples, "N", '"' + ",".join(BATCH_SOURCE_CATEGORIES) + '"')
+
+    ws_obs = wb.create_sheet("Observations")
+    _batch_style_header_row(ws_obs, BATCH_OBSERVATION_HEADERS)
+    _batch_add_table(ws_obs, BATCH_OBSERVATION_HEADERS, "ObservationsTable")
+    _batch_add_dropdown(ws_obs, "B", f"=Samples!$A$2:$A${BATCH_MAX_TEMPLATE_ROWS + 1}")
+    for row in range(2, BATCH_MAX_TEMPLATE_ROWS + 2):
+        ws_obs.cell(
+            row=row, column=4,
+            value=f'=IFERROR(IF(C{row}="","",IF(COUNTIF(\'Taxon Lookup\'!$B:$B,C{row})>0,"found","not found - will be queued for review")),"")'
+        )
+    ws_obs["C1"].comment = Comment(
+        "See the 'Taxon Lookup' sheet for names already in the database. If your species isn't there, type it anyway - it'll be queued for review rather than rejected.",
+        "Aphanologia"
+    )
+
+    if include_demographics:
+        ws_demo = wb.create_sheet("Demographics")
+        _batch_style_header_row(ws_demo, BATCH_DEMOGRAPHIC_HEADERS)
+        _batch_add_table(ws_demo, BATCH_DEMOGRAPHIC_HEADERS, "DemographicsTable")
+        _batch_add_dropdown(ws_demo, "B", f"=Observations!$A$2:$A${BATCH_MAX_TEMPLATE_ROWS + 1}")
+        _batch_add_dropdown(ws_demo, "C", '"' + ",".join(BATCH_SEX_OPTIONS) + '"')
+        _batch_add_dropdown(ws_demo, "D", '"' + ",".join(BATCH_LIFESTAGE_OPTIONS) + '"')
+
+    if include_specimens:
+        ws_spec = wb.create_sheet("Specimens")
+        _batch_style_header_row(ws_spec, BATCH_SPECIMEN_HEADERS)
+        _batch_add_table(ws_spec, BATCH_SPECIMEN_HEADERS, "SpecimensTable")
+        _batch_add_dropdown(ws_spec, "A", f"=Demographics!$A$2:$A${BATCH_MAX_TEMPLATE_ROWS + 1}")
+
+    ws_lookup = wb.create_sheet("Taxon Lookup")
+    lookup_headers = ["taxonID", "scientificName", "authorship", "rank", "status"]
+    _batch_style_header_row(ws_lookup, lookup_headers)
+    for i, t in enumerate(taxa, start=2):
+        ws_lookup.cell(row=i, column=1, value=t.get("taxon_id"))
+        ws_lookup.cell(row=i, column=2, value=t.get("scientific_name"))
+        ws_lookup.cell(row=i, column=3, value=t.get("authorship"))
+        ws_lookup.cell(row=i, column=4, value=t.get("rank"))
+        ws_lookup.cell(row=i, column=5, value=t.get("status"))
+    ws_lookup.freeze_panes = "A2"
+
+    wb.active = wb["Instructions"]
+    return wb
+
+
+def _batch_sheet_to_rows(ws):
+    """
+    Reads a header-row sheet into a list of dicts keyed by header
+    text, stopping cleanly at blank rows. Columns whose header ends
+    in '?' are treated as computed helper columns (e.g. "Species
+    found?") and ignored when deciding whether a row is genuinely
+    blank, since those recompute to an empty string even when every
+    real field on that row is untouched.
+    """
+    header_row = next(ws.iter_rows(min_row=1, max_row=1))
+    headers = [c.value for c in header_row]
+    rows = []
+    for row in ws.iter_rows(min_row=2):
+        values = {headers[i]: cell.value for i, cell in enumerate(row) if i < len(headers) and headers[i]}
+        real_values = {k: v for k, v in values.items() if not str(k).endswith('?')}
+        if all(v is None or str(v).strip() == '' for v in real_values.values()):
+            continue
+        rows.append({"_row": row[0].row, **values})
+    return rows
+
+
+def _batch_parse_workbook(file_bytes: bytes):
+    """
+    Loads the uploaded workbook and returns (samples, observations,
+    demographics, specimens, parse_errors). demographics/specimens
+    are empty lists if those sheets aren't present (a 2-sheet
+    upload). parse_errors is non-empty only for structural workbook
+    problems (missing required sheets) that make further validation
+    meaningless.
+    """
+    parse_errors = []
+    try:
+        wb = load_workbook(io.BytesIO(file_bytes), data_only=False)
+    except Exception as e:
+        return [], [], [], [], [f"Could not read this file as an Excel workbook: {str(e)}"]
+
+    if "Samples" not in wb.sheetnames:
+        parse_errors.append("Missing required 'Samples' sheet.")
+    if "Observations" not in wb.sheetnames:
+        parse_errors.append("Missing required 'Observations' sheet.")
+    if parse_errors:
+        return [], [], [], [], parse_errors
+
+    samples = _batch_sheet_to_rows(wb["Samples"])
+    observations = _batch_sheet_to_rows(wb["Observations"])
+    demographics = _batch_sheet_to_rows(wb["Demographics"]) if "Demographics" in wb.sheetnames else []
+    specimens = _batch_sheet_to_rows(wb["Specimens"]) if "Specimens" in wb.sheetnames else []
+    return samples, observations, demographics, specimens, []
+
+
+def _batch_validate(samples, observations, demographics, specimens):
+    """
+    Runs Pass 1 (structural) and Pass 2 (cross-sheet referential
+    integrity). Never fails on an unmatched taxon name - that's Pass
+    3, handled separately in _batch_resolve_taxa since it needs a
+    database connection and never produces a blocking error anyway.
+    Returns (errors, warnings) - both lists of {"sheet", "row",
+    "message"} dicts. Any entry in errors blocks commit; warnings
+    (e.g. "these species names will be queued for review") don't.
+    """
+    errors = []
+
+    sample_refs = {}
+    for s in samples:
+        ref = (s.get("Sample Ref*") or "").strip()
+        if not ref:
+            errors.append({"sheet": "Samples", "row": s["_row"], "message": "Sample Ref is required."})
+            continue
+        if ref in sample_refs:
+            errors.append({"sheet": "Samples", "row": s["_row"], "message": f"Duplicate Sample Ref '{ref}' (also used on row {sample_refs[ref]})."})
+            continue
+        sample_refs[ref] = s["_row"]
+
+    if not samples:
+        errors.append({"sheet": "Samples", "row": None, "message": "No sample rows found - the Samples sheet is empty."})
+
+    observation_refs = {}
+    for o in observations:
+        obs_ref = (o.get("Observation Ref*") or "").strip()
+        sample_ref = (o.get("Sample Ref*") or "").strip()
+        species = (o.get("Species*") or "").strip()
+        if not obs_ref:
+            errors.append({"sheet": "Observations", "row": o["_row"], "message": "Observation Ref is required."})
+        elif obs_ref in observation_refs:
+            errors.append({"sheet": "Observations", "row": o["_row"], "message": f"Duplicate Observation Ref '{obs_ref}' (also used on row {observation_refs[obs_ref]})."})
+        else:
+            observation_refs[obs_ref] = o["_row"]
+        if not sample_ref:
+            errors.append({"sheet": "Observations", "row": o["_row"], "message": "Sample Ref is required."})
+        elif sample_ref not in sample_refs:
+            errors.append({"sheet": "Observations", "row": o["_row"], "message": f"Sample Ref '{sample_ref}' does not match any row on the Samples sheet."})
+        if not species:
+            errors.append({"sheet": "Observations", "row": o["_row"], "message": "Species is required."})
+
+    if not observations:
+        errors.append({"sheet": "Observations", "row": None, "message": "No observation rows found - the Observations sheet is empty."})
+
+    demographic_refs = {}
+    for d in demographics:
+        demo_ref = (d.get("Demographic Ref*") or "").strip()
+        obs_ref = (d.get("Observation Ref*") or "").strip()
+        if not demo_ref:
+            errors.append({"sheet": "Demographics", "row": d["_row"], "message": "Demographic Ref is required."})
+        elif demo_ref in demographic_refs:
+            errors.append({"sheet": "Demographics", "row": d["_row"], "message": f"Duplicate Demographic Ref '{demo_ref}' (also used on row {demographic_refs[demo_ref]})."})
+        else:
+            demographic_refs[demo_ref] = d["_row"]
+        if not obs_ref:
+            errors.append({"sheet": "Demographics", "row": d["_row"], "message": "Observation Ref is required."})
+        elif obs_ref not in observation_refs:
+            errors.append({"sheet": "Demographics", "row": d["_row"], "message": f"Observation Ref '{obs_ref}' does not match any row on the Observations sheet."})
+
+    for sp in specimens:
+        demo_ref = (sp.get("Demographic Ref*") or "").strip()
+        if not demo_ref:
+            errors.append({"sheet": "Specimens", "row": sp["_row"], "message": "Demographic Ref is required."})
+        elif demo_ref not in demographic_refs:
+            errors.append({"sheet": "Specimens", "row": sp["_row"], "message": f"Demographic Ref '{demo_ref}' does not match any row on the Demographics sheet."})
+
+    return errors
+
+
+def _batch_resolve_taxa(cursor, observations):
+    """
+    Pass 3: exact (case-insensitive) match of each Species name
+    against taxonomy.scientificName. Returns a dict of
+    row_number -> {"taxon_id": ... } or {"proposed_name": ...} -
+    never an error; an unmatched name is always resolvable, just not
+    to an existing taxonID yet.
+    """
+    resolution = {}
+    unmatched_names = set()
+    for o in observations:
+        species = (o.get("Species*") or "").strip()
+        if not species:
+            continue
+        cursor.execute('SELECT "taxonID" FROM taxonomy WHERE LOWER("scientificName") = LOWER(%s) LIMIT 1;', (species,))
+        row = cursor.fetchone()
+        if row:
+            resolution[o["_row"]] = {"taxon_id": row["taxonID"], "proposed_name": None}
+        else:
+            resolution[o["_row"]] = {"taxon_id": None, "proposed_name": species}
+            unmatched_names.add(species)
+    return resolution, sorted(unmatched_names)
+
+
+@app.get("/api/v1/batch/template")
+def download_batch_template(
+    include_demographics: bool = Query(True),
+    include_specimens: bool = Query(True),
+    valid_taxa_only: bool = Query(True),
+    user: dict = Depends(require_contributor)
+):
+    """
+    Generates and streams a multi-sheet .xlsx template, sized to
+    whichever levels of detail the contributor wants to include.
+    valid_taxa_only controls what shows on the in-workbook Taxon
+    Lookup reference sheet only - it does not restrict what can
+    actually be typed into the Species column (see _batch_resolve_taxa).
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if valid_taxa_only:
+            cursor.execute("""
+                SELECT "taxonID" AS taxon_id, "scientificName" AS scientific_name,
+                       "scientificnameAuthorship" AS authorship, "taxonrank" AS rank, "taxonomicStatus" AS status
+                FROM taxonomy WHERE "taxonomicStatus" = 'accepted' ORDER BY "scientificName";
+            """)
+        else:
+            cursor.execute("""
+                SELECT "taxonID" AS taxon_id, "scientificName" AS scientific_name,
+                       "scientificnameAuthorship" AS authorship, "taxonrank" AS rank, "taxonomicStatus" AS status
+                FROM taxonomy ORDER BY "scientificName";
+            """)
+        taxa = cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+    wb = _build_batch_template(include_demographics, include_specimens, taxa)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=aphanologia_batch_template.xlsx"}
+    )
+
+
+@app.post("/api/v1/batch/validate")
+async def validate_batch_upload(file: UploadFile = File(...), user: dict = Depends(require_contributor)):
+    """
+    Parses and fully validates an uploaded workbook WITHOUT writing
+    anything to the database. Returns every structural/referential
+    problem found (Pass 1 + Pass 2), plus a non-blocking list of
+    species names that will be queued for superuser review (Pass 3
+    never blocks). The commit endpoint re-runs this exact same
+    validation before writing anything, so a stale validate result
+    can never lead to a bad commit.
+    """
+    file_bytes = await file.read()
+    samples, observations, demographics, specimens, parse_errors = _batch_parse_workbook(file_bytes)
+    if parse_errors:
+        return {"can_commit": False, "errors": [{"sheet": None, "row": None, "message": m} for m in parse_errors], "unmatched_taxa": []}
+
+    errors = _batch_validate(samples, observations, demographics, specimens)
+
+    unmatched_taxa = []
+    if not any(e["sheet"] == "Observations" and e["row"] is None for e in errors):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            _, unmatched_taxa = _batch_resolve_taxa(cursor, observations)
+        finally:
+            cursor.close()
+            conn.close()
+
+    return {
+        "can_commit": len(errors) == 0,
+        "errors": errors,
+        "unmatched_taxa": unmatched_taxa,
+        "counts": {
+            "samples": len(samples),
+            "observations": len(observations),
+            "demographics": len(demographics),
+            "specimens": len(specimens)
+        }
+    }
+
+
+@app.post("/api/v1/batch/commit")
+async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends(require_contributor)):
+    """
+    Re-validates, then - only if that validation is completely clean
+    of Pass 1/Pass 2 errors - writes every sample, observation,
+    demographic, and specimen in one transaction. An unmatched
+    species name never blocks this; that observation is created with
+    taxonID NULL and proposed_taxon_name set instead, ready for
+    superuser review. Superusers/hyperusers get every observation
+    auto-accepted (verification_status = 'verified', with a matching
+    row logged in observation_verification_actions so the audit
+    trail still shows how it was verified) - contributors' uploads
+    go to the same pending review queue as a single manual submission.
+    """
+    file_bytes = await file.read()
+    samples, observations, demographics, specimens, parse_errors = _batch_parse_workbook(file_bytes)
+    if parse_errors:
+        raise HTTPException(status_code=400, detail="; ".join(parse_errors))
+
+    errors = _batch_validate(samples, observations, demographics, specimens)
+    if errors:
+        raise HTTPException(status_code=400, detail=f"{len(errors)} row(s) failed validation - re-run /api/v1/batch/validate for details before committing.")
+
+    is_superuser = user["role"] in ("superuser", "hyperuser")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        taxon_resolution, unmatched_taxa = _batch_resolve_taxa(cursor, observations)
+
+        # --- Samples ---
+        sample_ref_to_event_id = {}
+        for s in samples:
+            cursor.execute("SELECT nextval('web_eventid_seq');")
+            new_event_id = f"WEB-{cursor.fetchone()['nextval']}"
+            sample_ref_to_event_id[(s.get("Sample Ref*") or "").strip()] = new_event_id
+
+            source_category = s.get("sourceCategory") or None
+            data_source_summary = source_category
+            if s.get("sourceOtherDetail"):
+                data_source_summary = f"{source_category}: {s['sourceOtherDetail']}" if source_category else s["sourceOtherDetail"]
+
+            cursor.execute("""
+                INSERT INTO samples (
+                    "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
+                    "coordinateuncertaintyinmeters", "earliestDateCollected", "latestDateCollected",
+                    "habitat", "microhabitat", "SHADe", "samplingProtocol", "recordedBy", "eventRemarks",
+                    "dataSource[free text]", submitted_by_user_id, entered_by, entered_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                );
+            """, (
+                new_event_id, s.get("samplingLocation"), s.get("decimalLatitude"), s.get("decimalLongitude"),
+                s.get("coordinateUncertaintyInMeters"), s.get("earliestDateCollected"), s.get("latestDateCollected"),
+                s.get("habitat"), s.get("microhabitat"), s.get("SHADe"), s.get("samplingProtocol"),
+                s.get("recordedBy"), s.get("eventRemarks"), data_source_summary,
+                user["user_id"], user["display_name"]
+            ))
+            if s.get("decimalLatitude") is not None and s.get("decimalLongitude") is not None:
+                cursor.execute("""
+                    UPDATE samples SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s::float8, %s::float8), 4326)
+                    WHERE "eventID" = %s;
+                """, (s["decimalLongitude"], s["decimalLatitude"], new_event_id))
+
+        # --- Observations ---
+        observation_ref_to_id = {}
+        verification_status = "verified" if is_superuser else "pending"
+        for o in observations:
+            cursor.execute("SELECT nextval('web_observationid_seq');")
+            new_obs_id = f"WEB-{cursor.fetchone()['nextval']}"
+            observation_ref_to_id[(o.get("Observation Ref*") or "").strip()] = new_obs_id
+
+            event_id = sample_ref_to_event_id[(o.get("Sample Ref*") or "").strip()]
+            resolved = taxon_resolution.get(o["_row"], {"taxon_id": None, "proposed_name": None})
+
+            cursor.execute("""
+                INSERT INTO observations (
+                    "observationID", "eventID", "taxonID", proposed_taxon_name, "identifiedBy",
+                    "identificationVerificationStatus", "identificationRemarks",
+                    "basisOfRecord", "idTechnique", "idText[free_text]",
+                    verification_status, verified_by, verified_date,
+                    submitted_by_user_id, entered_by, entered_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                );
+            """, (
+                new_obs_id, event_id, resolved["taxon_id"], resolved["proposed_name"], o.get("identifiedBy"),
+                o.get("identificationVerificationStatus"), o.get("identificationRemarks"),
+                o.get("basisOfRecord"), o.get("idTechnique"), o.get("idText"),
+                verification_status, (user["display_name"] if is_superuser else None), None,
+                user["user_id"], user["display_name"]
+            ))
+            # verified_date needs CURRENT_TIMESTAMP, which can't be a
+            # bound parameter alongside the rest of this row - set
+            # separately, only for superuser auto-verified rows.
+            if is_superuser:
+                cursor.execute("""
+                    UPDATE observations SET verified_date = CURRENT_TIMESTAMP WHERE "observationID" = %s;
+                """, (new_obs_id,))
+                cursor.execute("""
+                    INSERT INTO observation_verification_actions (
+                        "observationID", action_type, notes, performed_by_user_id
+                    ) VALUES (%s, 'accepted', 'Auto-accepted: superuser batch upload', %s);
+                """, (new_obs_id, user["user_id"]))
+
+        # --- Demographics ---
+        demographic_ref_to_id = {}
+        for d in demographics:
+            cursor.execute("SELECT nextval('web_demographicid_seq');")
+            new_demo_id = f"WEB-{cursor.fetchone()['nextval']}"
+            demographic_ref_to_id[(d.get("Demographic Ref*") or "").strip()] = new_demo_id
+            obs_id = observation_ref_to_id[(d.get("Observation Ref*") or "").strip()]
+
+            cursor.execute("""
+                INSERT INTO observation_demographics (
+                    "demographicID", "observationID", sex, lifestage, count,
+                    density, "densityUnit", "minCount", "maxCount", "countDescription"
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """, (
+                new_demo_id, obs_id, d.get("sex"), d.get("lifestage"), d.get("count"),
+                d.get("density"), d.get("densityUnit"), d.get("minCount"), d.get("maxCount"), d.get("countDescription")
+            ))
+
+        # --- Specimens ---
+        for sp in specimens:
+            cursor.execute("SELECT nextval('web_specimenid_seq');")
+            new_spec_id = f"WEB-{cursor.fetchone()['nextval']}"
+            demo_id = demographic_ref_to_id[(sp.get("Demographic Ref*") or "").strip()]
+
+            cursor.execute("""
+                INSERT INTO specimens (
+                    "specimenID", "demographicID", "specCount", "specLocation",
+                    "specRef", "specPreservation", "specType", "specComments"
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+            """, (
+                new_spec_id, demo_id, sp.get("specCount"), sp.get("specLocation"),
+                sp.get("specRef"), sp.get("specPreservation"), sp.get("specType"), sp.get("specComments")
+            ))
+
+        conn.commit()
+        return {
+            "message": "Batch upload committed.",
+            "samples_created": len(sample_ref_to_event_id),
+            "observations_created": len(observation_ref_to_id),
+            "demographics_created": len(demographic_ref_to_id),
+            "specimens_created": len(specimens),
+            "auto_verified": is_superuser,
+            "queued_for_taxonomy_review": unmatched_taxa,
+            "sample_ref_map": sample_ref_to_event_id,
+            "observation_ref_map": observation_ref_to_id
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not commit batch upload: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ==========================================================
 # LITERATURE & PROJECT LOOKUP (source-of-record picker)
 # ==========================================================
 
@@ -1013,6 +1828,229 @@ def create_literature(payload: LiteratureSubmission, user: dict = Depends(requir
         conn.close()
 
 
+# ----------------------------------------------------------------
+# Literature browsing & management (/literature page)
+# ----------------------------------------------------------------
+# Browsing is public - anyone can look up what's in the reference
+# library. Adding new entries reuses the existing require_contributor
+# endpoint above. Editing and deleting existing entries, and
+# assigning/unassigning a reference to taxa, are superuser-only.
+
+@app.get("/api/v1/literature")
+def list_literature(
+    q: Optional[str] = Query(None, description="Optional fuzzy filter across author, title, year, publication"),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """
+    Paginated browse listing for the /literature page - every column
+    on the literature table (not just a formatted citation string, as
+    /api/v1/literature/search returns), optionally filtered by the
+    same fuzzy search used elsewhere. With no query, returns entries
+    newest-first so the most recently catalogued references surface
+    first.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if q:
+            cursor.execute("""
+                SELECT *, similarity(search_text, %s) AS sim
+                FROM literature
+                WHERE search_text %% %s OR search_text ILIKE %s
+                ORDER BY
+                    CASE WHEN search_text ILIKE %s THEN 0 ELSE 1 END,
+                    sim DESC
+                LIMIT %s OFFSET %s;
+            """, (q, q, f"%{q}%", f"%{q}%", limit, offset))
+        else:
+            cursor.execute("""
+                SELECT * FROM literature
+                ORDER BY "yearPublished" DESC NULLS LAST, "authorName" ASC
+                LIMIT %s OFFSET %s;
+            """, (limit, offset))
+        rows = cursor.fetchall()
+
+        count_cursor_sql = "SELECT COUNT(*) AS total FROM literature" + (" WHERE search_text %% %s OR search_text ILIKE %s" if q else "")
+        count_params = (q, f"%{q}%") if q else ()
+        cursor.execute(count_cursor_sql, count_params)
+        total = cursor.fetchone()["total"]
+
+        return {"results": rows, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/literature/{lit_id}")
+def get_literature_detail(lit_id: str):
+    """
+    Full detail for one literature entry, plus how many places it's
+    cited from (observations, samples, taxa) and exactly which taxa -
+    used by the /literature page's detail view, and to decide whether
+    deletion should be allowed.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM literature WHERE "litID" = %s;', (lit_id,))
+        entry = cursor.fetchone()
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"No literature entry found with litID {lit_id}")
+
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_literature_junction WHERE "litID" = %s;', (lit_id,))
+        obs_count = cursor.fetchone()["n"]
+        cursor.execute('SELECT COUNT(*) AS n FROM sample_literature_junction WHERE "litID" = %s;', (lit_id,))
+        sample_count = cursor.fetchone()["n"]
+        cursor.execute("""
+            SELECT j.taxonid AS taxon_id, t."scientificName" AS scientific_name, j."Type" AS type
+            FROM taxonomy_literature_junction j
+            JOIN taxonomy t ON j.taxonid = t."taxonID"
+            WHERE j."litID" = %s
+            ORDER BY t."scientificName";
+        """, (lit_id,))
+        linked_taxa = cursor.fetchall()
+
+        return {
+            "entry": entry,
+            "usage": {
+                "observations": obs_count,
+                "samples": sample_count,
+                "taxa": len(linked_taxa)
+            },
+            "linked_taxa": linked_taxa
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/v1/literature/{lit_id}")
+def edit_literature(lit_id: str, payload: LiteratureSubmission, user: dict = Depends(require_superuser)):
+    """
+    Edits an existing literature entry (fixing a typo, filling in a
+    missing DOI, etc). Full-replace, like the taxonomy editor's PUT -
+    logged to admin_activity_log with a field-by-field diff.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM literature WHERE "litID" = %s;', (lit_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail=f"No literature entry found with litID {lit_id}")
+
+        new_values = {
+            "authorName": payload.authorName, "editorName": payload.editorName,
+            "yearPublished": payload.yearPublished, "articleTitle": payload.articleTitle,
+            "publicationTitle": payload.publicationTitle, "publicationSeries": payload.publicationSeries,
+            "publicationVolume": payload.publicationVolume, "publicationIssue": payload.publicationIssue,
+            "publicationTotalpages": payload.publicationTotalpages, "publicationPages": payload.publicationPages,
+            "publishedBy": payload.publishedBy, "publicationISBNorISSN": payload.publicationISBNorISSN,
+            "publicationDOI": payload.publicationDOI, "sourceURL": payload.sourceURL, "litNotes": payload.litNotes
+        }
+
+        field_changes = {}
+        for field, new_val in new_values.items():
+            if (current[field] or None) != (new_val or None):
+                field_changes[field] = {"old": current[field], "new": new_val}
+
+        if not field_changes:
+            return {"litID": lit_id, "message": "No changes to save.", "changed_fields": []}
+
+        cursor.execute("""
+            UPDATE literature SET
+                "authorName" = %s, "editorName" = %s, "yearPublished" = %s, "articleTitle" = %s,
+                "publicationTitle" = %s, "publicationSeries" = %s, "publicationVolume" = %s,
+                "publicationIssue" = %s, "publicationTotalpages" = %s, "publicationPages" = %s,
+                "publishedBy" = %s, "publicationISBNorISSN" = %s, "publicationDOI" = %s,
+                "sourceURL" = %s, "litNotes" = %s
+            WHERE "litID" = %s;
+        """, (
+            new_values["authorName"], new_values["editorName"], new_values["yearPublished"], new_values["articleTitle"],
+            new_values["publicationTitle"], new_values["publicationSeries"], new_values["publicationVolume"],
+            new_values["publicationIssue"], new_values["publicationTotalpages"], new_values["publicationPages"],
+            new_values["publishedBy"], new_values["publicationISBNorISSN"], new_values["publicationDOI"],
+            new_values["sourceURL"], new_values["litNotes"], lit_id
+        ))
+
+        cursor.execute("""
+            INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+        """, (user["user_id"], "literature_edit", "literature", lit_id, json.dumps(field_changes), None))
+
+        conn.commit()
+        return {"litID": lit_id, "message": "Saved.", "changed_fields": list(field_changes.keys())}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save literature entry: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/literature/{lit_id}")
+def delete_literature(lit_id: str, user: dict = Depends(require_superuser)):
+    """
+    Deletes a literature entry outright - only allowed when nothing
+    still cites it (no observations, samples, or taxa reference this
+    litID), so deletion can never silently orphan a citation
+    elsewhere. If it's still in use, the error message says exactly
+    where, so the superuser knows what to unlink first.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM literature WHERE "litID" = %s;', (lit_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No literature entry found with litID {lit_id}")
+
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_literature_junction WHERE "litID" = %s;', (lit_id,))
+        obs_count = cursor.fetchone()["n"]
+        cursor.execute('SELECT COUNT(*) AS n FROM sample_literature_junction WHERE "litID" = %s;', (lit_id,))
+        sample_count = cursor.fetchone()["n"]
+        cursor.execute('SELECT COUNT(*) AS n FROM taxonomy_literature_junction WHERE "litID" = %s;', (lit_id,))
+        taxon_count = cursor.fetchone()["n"]
+
+        if obs_count or sample_count or taxon_count:
+            parts = []
+            if obs_count: parts.append(f"{obs_count} observation(s)")
+            if sample_count: parts.append(f"{sample_count} sample(s)")
+            if taxon_count: parts.append(f"{taxon_count} taxon/taxa")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete - still cited by {', '.join(parts)}. Unlink it from those first."
+            )
+
+        cursor.execute('DELETE FROM literature WHERE "litID" = %s;', (lit_id,))
+
+        cursor.execute("""
+            INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+        """, (user["user_id"], "literature_delete", "literature", lit_id, json.dumps({}), None))
+
+        conn.commit()
+        return {"message": "Literature entry deleted."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete literature entry: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @app.get("/api/v1/projects/search")
 def search_projects(
     q: str = Query(..., min_length=2, description="Fuzzy search across project name"),
@@ -1038,6 +2076,77 @@ def search_projects(
         """, (q, q, f"%{q}%", f"%{q}%", limit))
         rows = cursor.fetchall()
         return {"query": q, "count": len(rows), "results": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/projects")
+def list_projects(
+    q: Optional[str] = Query(None, description="Optional fuzzy filter across project name"),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """
+    Paginated browse listing for the Projects tab on /literature -
+    mirrors list_literature. With no query, returns newest-first.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if q:
+            cursor.execute("""
+                SELECT *, similarity(project_name, %s) AS sim
+                FROM recording_projects
+                WHERE project_name %% %s OR project_name ILIKE %s
+                ORDER BY
+                    CASE WHEN project_name ILIKE %s THEN 0 ELSE 1 END,
+                    sim DESC
+                LIMIT %s OFFSET %s;
+            """, (q, q, f"%{q}%", f"%{q}%", limit, offset))
+        else:
+            cursor.execute("""
+                SELECT * FROM recording_projects
+                ORDER BY entered_at DESC NULLS LAST, project_name ASC
+                LIMIT %s OFFSET %s;
+            """, (limit, offset))
+        rows = cursor.fetchall()
+
+        count_sql = "SELECT COUNT(*) AS total FROM recording_projects" + (" WHERE project_name %% %s OR project_name ILIKE %s" if q else "")
+        count_params = (q, f"%{q}%") if q else ()
+        cursor.execute(count_sql, count_params)
+        total = cursor.fetchone()["total"]
+
+        return {"results": rows, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/projects/{project_id}")
+def get_project_detail(project_id: int):
+    """
+    Full detail for one project, plus how many samples cite it as
+    their source, for the Projects tab's detail view.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM recording_projects WHERE project_id = %s;", (project_id,))
+        entry = cursor.fetchone()
+        if not entry:
+            raise HTTPException(status_code=404, detail=f"No project found with id {project_id}")
+
+        cursor.execute("SELECT COUNT(*) AS n FROM sample_project_junction WHERE project_id = %s;", (project_id,))
+        sample_count = cursor.fetchone()["n"]
+
+        return {"entry": entry, "usage": {"samples": sample_count}}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
     finally:
@@ -1490,13 +2599,13 @@ def get_review_queue(user: dict = Depends(require_superuser)):
 
         cursor.execute("""
             SELECT
-                o."observationID", o."eventID", o."taxonID", t."scientificName",
+                o."observationID", o."eventID", o."taxonID", t."scientificName", o.proposed_taxon_name,
                 o."identifiedBy", o."identificationVerificationStatus", o."identificationRemarks",
                 o."basisOfRecord", o."idTechnique", o."idText[free_text]" AS "idText",
                 o.verification_status, o.entered_at,
                 u.display_name AS submitted_by_name, u.email AS submitted_by_email
             FROM observations o
-            JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
             LEFT JOIN users u ON o.submitted_by_user_id = u.user_id
             WHERE o."eventID" = ANY(%s)
             ORDER BY o.entered_at ASC;
@@ -1545,6 +2654,39 @@ def get_review_queue(user: dict = Depends(require_superuser)):
             sample["observations"] = obs_by_event.get(sample["eventID"], [])
 
         return {"samples": samples}
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/admin/unresolved-taxa")
+def get_unresolved_taxa(user: dict = Depends(require_superuser)):
+    """
+    Lists every observation still awaiting taxon resolution
+    (taxonID IS NULL, proposed_taxon_name IS NOT NULL) - almost
+    always the result of a batch upload where the typed species name
+    didn't exactly match anything already in the taxonomy table.
+    Deliberately independent of verification_status: a superuser's
+    own batch upload gets auto-verified immediately, but the taxon
+    itself can still be genuinely unresolved and need the same
+    attention as a contributor's pending one.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                o."observationID", o."eventID", o.proposed_taxon_name, o.verification_status, o.entered_at,
+                s."samplingLocation", s."earliestDateCollected",
+                u.display_name AS submitted_by_name
+            FROM observations o
+            LEFT JOIN samples s ON o."eventID" = s."eventID"
+            LEFT JOIN users u ON o.submitted_by_user_id = u.user_id
+            WHERE o."taxonID" IS NULL AND o.proposed_taxon_name IS NOT NULL
+            ORDER BY o.entered_at ASC;
+        """)
+        rows = cursor.fetchall()
+        return {"count": len(rows), "observations": rows}
     finally:
         cursor.close()
         conn.close()
@@ -1659,6 +2801,42 @@ def submit_verification_action(
 # (/api/v1/taxonomy/detail/{id}, /api/v1/taxonomy/search,
 # /api/v1/taxonomy/children/{id}) - only the writes below are new.
 
+VALID_TAXONOMIC_STATUSES = {"accepted", "synonym", "misapplied", "doubtful"}
+
+VALID_TAXON_LITERATURE_TYPES = {
+    "Taxonomy or synonymy from",
+    "Name first published in",
+    "As used in",
+    "Presence in UK from",
+    "Identification Key",
+}
+
+# Observation-level literature links are about this specific record's
+# determination, not about where the record itself came from (that's
+# the sample's source-of-record / literature link instead - see
+# sample_literature_junction).
+VALID_OBSERVATION_LITERATURE_TYPES = {
+    "Identified using",              # the key/reference used to determine this specimen
+    "Determination confirmed in",    # a later taxonomic revision or expert paper that confirms/reassigns this specific determination
+    "First published record in",     # this record is itself the subject of a published note (e.g. a first county/country record)
+    "Discussed in",                  # a later paper discusses this specific record
+}
+
+VALID_NOMENCLATURAL_STATUSES = {
+    "invalid - junior synonym",
+    "invalid - literature misspelling",
+    "invalid - misspelled or invalid basionym",
+    "invalid - misspelled or invalid junior synonym",
+    "invalid - subsequent combination of basionym",
+    "invalid - subsequent combination of junior synonym",
+    "invalid - superseded basionym",
+    "nomen dubium",
+    "nomen nudum",
+    "species inquirenda",
+    "valid name with subgenus",
+}
+
+
 def _get_ancestor_id_set(cursor, taxon_id: str) -> set:
     """Small helper: the set of taxonIDs in a taxon's ancestor chain,
     used to block reparenting moves that would create a cycle (i.e.
@@ -1678,10 +2856,15 @@ def edit_taxonomy(
     changes, reparenting within the hierarchy, or marking it as a
     synonym of another taxon. Validates that reparenting can't create
     a circular chain of ancestry, and that synonymy always points
-    directly at a genuinely accepted taxon (never at another synonym,
-    and never at a taxon that still has its own children hanging off
-    it in the hierarchy). Logs a field-by-field diff of whatever
-    actually changed to admin_activity_log.
+    directly at a genuinely accepted taxon (never at another
+    synonym). If the taxon being synonymised has children that are
+    themselves already synonyms (e.g. it's a species with a dozen
+    older names synonymised under it), those are automatically
+    re-pointed to the new accepted name rather than blocking the
+    edit - only children that are still valid taxa in their own
+    right (e.g. a subspecies or variety) block the edit, since those
+    need a human decision about where they belong. Logs a
+    field-by-field diff of whatever changed to admin_activity_log.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1706,6 +2889,10 @@ def edit_taxonomy(
             raise HTTPException(status_code=400, detail="scientificName is required")
         if not new_values["taxonrank"]:
             raise HTTPException(status_code=400, detail="taxonrank is required")
+        if new_values["taxonomicStatus"] and new_values["taxonomicStatus"] not in VALID_TAXONOMIC_STATUSES:
+            raise HTTPException(status_code=400, detail=f"taxonomicStatus must be one of {sorted(VALID_TAXONOMIC_STATUSES)}")
+        if new_values["nomenclaturalStatus"] and new_values["nomenclaturalStatus"] not in VALID_NOMENCLATURAL_STATUSES:
+            raise HTTPException(status_code=400, detail=f"nomenclaturalStatus must be one of {sorted(VALID_NOMENCLATURAL_STATUSES)}")
 
         # --- Reparenting validation ---
         new_parent = new_values["parentNameUsageID"]
@@ -1721,8 +2908,10 @@ def edit_taxonomy(
             if taxon_id in _get_ancestor_id_set(cursor, new_parent):
                 raise HTTPException(status_code=400, detail="That would create a circular parentage - the new parent is a descendant of this taxon")
 
-        # --- Synonymy validation ---
+        # --- Synonymy validation, plus automatic cascade of any
+        # synonym children onto the new accepted name ---
         new_accepted = new_values["acceptedNameUsageID"]
+        cascaded_synonym_children = []
         if new_accepted and new_accepted != current["acceptedNameUsageID"]:
             if new_accepted == taxon_id:
                 raise HTTPException(status_code=400, detail="A taxon cannot be a synonym of itself")
@@ -1732,18 +2921,50 @@ def edit_taxonomy(
                 raise HTTPException(status_code=400, detail="acceptedNameUsageID does not match any taxon")
             if accepted_row["acceptedNameUsageID"] is not None:
                 raise HTTPException(status_code=400, detail="Cannot mark this as a synonym of another synonym - point to the accepted name directly")
-            cursor.execute('SELECT 1 FROM taxonomy WHERE "parentNameUsageID" = %s LIMIT 1;', (taxon_id,))
-            if cursor.fetchone():
-                raise HTTPException(status_code=400, detail="This taxon still has children in the hierarchy - reparent them elsewhere before marking it as a synonym")
+
+            cursor.execute(
+                'SELECT "taxonID", "scientificName", "acceptedNameUsageID" FROM taxonomy WHERE "parentNameUsageID" = %s;',
+                (taxon_id,)
+            )
+            children = cursor.fetchall()
+            # A child is still "valid" (blocks the edit) if it has no
+            # acceptedNameUsageID of its own - i.e. it's a genuine
+            # lower taxon (subspecies, variety, forma...), not just a
+            # synonym parked here for browsing. Synonym children carry
+            # their own acceptedNameUsageID (normally == taxon_id) and
+            # can simply be re-pointed at the new accepted name.
+            valid_children = [c for c in children if c["acceptedNameUsageID"] is None]
+            synonym_children = [c for c in children if c["acceptedNameUsageID"] is not None]
+
+            if valid_children:
+                names = ", ".join(c["scientificName"] for c in valid_children[:5])
+                more = f" (+{len(valid_children) - 5} more)" if len(valid_children) > 5 else ""
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"This taxon still has valid (non-synonym) children in the hierarchy - reparent them elsewhere before marking it as a synonym, e.g. {names}{more}"
+                )
+
+            if synonym_children:
+                child_ids = [c["taxonID"] for c in synonym_children]
+                cursor.execute("""
+                    UPDATE taxonomy
+                    SET "acceptedNameUsageID" = %s, "parentNameUsageID" = %s
+                    WHERE "taxonID" = ANY(%s);
+                """, (new_accepted, new_accepted, child_ids))
+                cascaded_synonym_children = [
+                    {"taxonID": c["taxonID"], "scientificName": c["scientificName"]} for c in synonym_children
+                ]
 
         # --- Diff against current values, for the audit log ---
         field_changes = {}
         for field, new_val in new_values.items():
             if (current[field] or None) != (new_val or None):
                 field_changes[field] = {"old": current[field], "new": new_val}
+        if cascaded_synonym_children:
+            field_changes["cascaded_synonym_children"] = cascaded_synonym_children
 
         if not field_changes:
-            return {"taxonID": taxon_id, "message": "No changes to save.", "changed_fields": []}
+            return {"taxonID": taxon_id, "message": "No changes to save.", "changed_fields": [], "cascaded_synonym_children": []}
 
         cursor.execute("""
             UPDATE taxonomy SET
@@ -1763,7 +2984,13 @@ def edit_taxonomy(
         """, (user["user_id"], "taxonomy_edit", "taxonomy", taxon_id, json.dumps(field_changes), payload.notes))
 
         conn.commit()
-        return {"taxonID": taxon_id, "message": "Saved.", "changed_fields": list(field_changes.keys())}
+        changed_fields = [f for f in field_changes.keys() if f != "cascaded_synonym_children"]
+        return {
+            "taxonID": taxon_id,
+            "message": "Saved.",
+            "changed_fields": changed_fields,
+            "cascaded_synonym_children": cascaded_synonym_children
+        }
     except HTTPException:
         conn.rollback()
         raise
@@ -1784,6 +3011,12 @@ def create_taxonomy(payload: TaxonomyCreateSubmission, user: dict = Depends(requ
     parent). Gets a WEB-prefixed taxonID, the same convention used
     everywhere else new records are created via the site, so it can
     never collide with a legacy imported taxonID (e.g. 244).
+
+    Optionally attaches one or more literature references in the same
+    transaction (payload.literature_links) - since almost every new
+    taxon needs at least one supporting reference, the editor page
+    lets the person pick these before the taxon exists yet, and they
+    get created together rather than needing a separate step.
     """
     if not payload.parentNameUsageID and not payload.acceptedNameUsageID:
         raise HTTPException(status_code=400, detail="Provide either parentNameUsageID (a new taxon in the hierarchy) or acceptedNameUsageID (a new synonym of an existing taxon)")
@@ -1791,6 +3024,13 @@ def create_taxonomy(payload: TaxonomyCreateSubmission, user: dict = Depends(requ
         raise HTTPException(status_code=400, detail="Provide parentNameUsageID OR acceptedNameUsageID, not both")
     if not payload.scientificName.strip():
         raise HTTPException(status_code=400, detail="scientificName is required")
+    if payload.taxonomicStatus and payload.taxonomicStatus not in VALID_TAXONOMIC_STATUSES:
+        raise HTTPException(status_code=400, detail=f"taxonomicStatus must be one of {sorted(VALID_TAXONOMIC_STATUSES)}")
+    if payload.nomenclaturalStatus and payload.nomenclaturalStatus not in VALID_NOMENCLATURAL_STATUSES:
+        raise HTTPException(status_code=400, detail=f"nomenclaturalStatus must be one of {sorted(VALID_NOMENCLATURAL_STATUSES)}")
+    for link in (payload.literature_links or []):
+        if link.Type not in VALID_TAXON_LITERATURE_TYPES:
+            raise HTTPException(status_code=400, detail=f"Literature link Type must be one of {sorted(VALID_TAXON_LITERATURE_TYPES)}")
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1825,20 +3065,185 @@ def create_taxonomy(payload: TaxonomyCreateSubmission, user: dict = Depends(requ
             payload.parentNameUsageID, payload.acceptedNameUsageID
         ))
 
-        log_snapshot = payload.dict(exclude={"notes"})
+        log_snapshot = payload.dict(exclude={"notes", "literature_links"})
         cursor.execute("""
             INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
             VALUES (%s, %s, %s, %s, %s::jsonb, %s);
         """, (user["user_id"], "taxonomy_create", "taxonomy", new_id, json.dumps(log_snapshot), payload.notes))
 
+        linked_lit_ids = []
+        for link in (payload.literature_links or []):
+            cursor.execute('SELECT 1 FROM literature WHERE "litID" = %s;', (link.litID,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail=f"No literature entry found with litID {link.litID}")
+            cursor.execute("""
+                INSERT INTO taxonomy_literature_junction (
+                    taxonid, "Type", "litID", is_identification_key, key_scope_rank, online_resource_url, access_notes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s);
+            """, (
+                new_id, link.Type, link.litID, (link.Type == "Identification Key"),
+                link.key_scope_rank, link.online_resource_url, link.access_notes
+            ))
+            cursor.execute("""
+                INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+            """, (
+                user["user_id"], "taxonomy_literature_link_added", "taxonomy_literature_junction", new_id,
+                json.dumps({"litID": link.litID, "Type": link.Type}), link.notes
+            ))
+            linked_lit_ids.append(link.litID)
+
         conn.commit()
-        return {"taxonID": new_id, "message": "Taxon created."}
+        return {"taxonID": new_id, "message": "Taxon created.", "linked_literature": linked_lit_ids}
     except HTTPException:
         conn.rollback()
         raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Could not create taxon: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ----------------------------------------------------------------
+# Taxon <-> literature linking (taxonomy_literature_junction)
+# ----------------------------------------------------------------
+
+@app.get("/api/v1/admin/taxonomy/{taxon_id}/literature-links")
+def get_taxon_literature_links(taxon_id: str, user: dict = Depends(require_superuser)):
+    """
+    Returns every literature link on a taxon in full, unformatted
+    detail - unlike the public /api/v1/taxonomy/literature/{taxon_id}
+    endpoint (which only returns citations pre-grouped for display),
+    this includes litID and the identification-key fields, so the
+    taxonomy editor can list and remove individual links.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                j.taxonid, j."Type", j."litID",
+                j.is_identification_key, j.key_scope_rank, j.online_resource_url, j.access_notes,
+                CONCAT_WS(', ', l."authorName", l."yearPublished", l."articleTitle", l."publicationTitle") AS formatted_ref
+            FROM taxonomy_literature_junction j
+            JOIN literature l ON j."litID" = l."litID"
+            WHERE j.taxonid = %s
+            ORDER BY j."Type", l."yearPublished" DESC;
+        """, (taxon_id,))
+        rows = cursor.fetchall()
+        return {"taxon_id": taxon_id, "count": len(rows), "links": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/taxonomy/{taxon_id}/literature-links")
+def add_taxon_literature_link(
+    taxon_id: str,
+    payload: TaxonLiteratureLinkSubmission,
+    user: dict = Depends(require_superuser)
+):
+    """
+    Links a literature reference to a taxon, recording which of the
+    five relationship types it represents (the same categories the
+    public taxonomy page groups citations into) - including
+    "Identification Key" as its own type, distinct from taxonomic/
+    synonymy decisions - and, when that's the type chosen, optionally
+    the rank the key covers. Logged to admin_activity_log like every
+    other taxonomy edit.
+    """
+    if payload.Type not in VALID_TAXON_LITERATURE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Type must be one of {sorted(VALID_TAXON_LITERATURE_TYPES)}")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM taxonomy WHERE "taxonID" = %s;', (taxon_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No taxon found with taxonID {taxon_id}")
+        cursor.execute('SELECT 1 FROM literature WHERE "litID" = %s;', (payload.litID,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No literature entry found with litID {payload.litID}")
+
+        cursor.execute("""
+            SELECT 1 FROM taxonomy_literature_junction
+            WHERE taxonid = %s AND "Type" = %s AND "litID" = %s;
+        """, (taxon_id, payload.Type, payload.litID))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="This taxon is already linked to that reference with that relationship type")
+
+        cursor.execute("""
+            INSERT INTO taxonomy_literature_junction (
+                taxonid, "Type", "litID", is_identification_key, key_scope_rank, online_resource_url, access_notes
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s);
+        """, (
+            taxon_id, payload.Type, payload.litID, (payload.Type == "Identification Key"),
+            payload.key_scope_rank, payload.online_resource_url, payload.access_notes
+        ))
+
+        cursor.execute("""
+            INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+        """, (
+            user["user_id"], "taxonomy_literature_link_added", "taxonomy_literature_junction", taxon_id,
+            json.dumps({"litID": payload.litID, "Type": payload.Type}), payload.notes
+        ))
+
+        conn.commit()
+        return {"message": "Literature link added.", "taxon_id": taxon_id, "litID": payload.litID, "Type": payload.Type}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not add literature link: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/taxonomy/{taxon_id}/literature-links")
+def remove_taxon_literature_link(
+    taxon_id: str,
+    lit_id: str = Query(..., description="The litID to unlink"),
+    link_type: str = Query(..., alias="type", description="The relationship type of the link being removed"),
+    user: dict = Depends(require_superuser)
+):
+    """
+    Removes one taxon-literature link, identified by its composite
+    key (taxon, reference, relationship type), since the junction
+    table has no separate surrogate ID column of its own.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            DELETE FROM taxonomy_literature_junction
+            WHERE taxonid = %s AND "Type" = %s AND "litID" = %s;
+        """, (taxon_id, link_type, lit_id))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="No matching literature link found to remove")
+
+        cursor.execute("""
+            INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+        """, (
+            user["user_id"], "taxonomy_literature_link_removed", "taxonomy_literature_junction", taxon_id,
+            json.dumps({"litID": lit_id, "Type": link_type}), None
+        ))
+
+        conn.commit()
+        return {"message": "Literature link removed."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not remove literature link: {str(e)}")
     finally:
         cursor.close()
         conn.close()
@@ -1882,6 +3287,1206 @@ def get_admin_activity_log(
         return {"count": len(rows), "entries": rows}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ==========================================================
+# RECORD EDITOR (samples / observations / demographics /
+# specimens) - superuser only
+# ==========================================================
+# Lets a superuser correct, extend, delete, or duplicate the actual
+# field records - as opposed to the taxonomy/literature reference
+# data the admin tools above manage. Every write here follows the
+# same pattern already established elsewhere: full-replace edits
+# with a logged diff, cascading deletes made explicit and safe
+# rather than left to chance or a database default, and duplication
+# as a first-class operation (e.g. splitting one sample/observation
+# that actually spans more than one microhabitat into two).
+#
+# verification_status/verified_by/verified_date/verification_notes
+# on observations are deliberately NOT editable through this editor -
+# they're managed through the audited /review workflow
+# (submit_verification_action above) so every change to them keeps
+# landing in observation_verification_actions.
+
+def _log_admin_action(cursor, user, action_type, table_name, record_id, field_changes, notes=None):
+    cursor.execute("""
+        INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes, notes)
+        VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+    """, (user["user_id"], action_type, table_name, record_id, json.dumps(field_changes), notes))
+
+
+def _diff_row(current, new_values: dict):
+    """
+    Field-by-field diff for full-replace edits. Empty string and None
+    are treated as equivalent for text fields (matching the taxonomy
+    editor's convention), but non-string values (numbers, booleans)
+    are compared directly, so a legitimate 0 or False is never
+    mistaken for "unset".
+    """
+    changes = {}
+    for field, new_val in new_values.items():
+        old_val = current[field]
+        old_norm = (old_val or None) if isinstance(old_val, str) or old_val is None else old_val
+        new_norm = (new_val or None) if isinstance(new_val, str) or new_val is None else new_val
+        if old_norm != new_norm:
+            changes[field] = {"old": old_val, "new": new_val}
+    return changes
+
+
+# ---------- samples ----------
+
+@app.get("/api/v1/admin/samples/search")
+def admin_search_samples(
+    q: str = Query(..., min_length=2),
+    limit: int = Query(20, ge=1, le=50),
+    user: dict = Depends(require_superuser)
+):
+    """
+    Simple ILIKE search across eventID, samplingLocation, recordedBy
+    and gridRef - for finding a sample to edit without already
+    knowing its exact eventID.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        like = f"%{q}%"
+        cursor.execute("""
+            SELECT "eventID", "samplingLocation", "recordedBy", "gridRef",
+                   "earliestDateCollected", "latestDateCollected"
+            FROM samples
+            WHERE "eventID" ILIKE %s OR "samplingLocation" ILIKE %s OR "recordedBy" ILIKE %s OR "gridRef" ILIKE %s
+            ORDER BY "earliestDateCollected" DESC NULLS LAST
+            LIMIT %s;
+        """, (like, like, like, like, limit))
+        return {"results": cursor.fetchall()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/admin/samples/{event_id}")
+def get_admin_sample_detail(event_id: str, user: dict = Depends(require_superuser)):
+    """
+    Full sample record plus the observations attached to it (with
+    taxon name and verification status, so you can see and jump into
+    each one), and its literature/project source links.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM samples WHERE "eventID" = %s;', (event_id,))
+        sample = cursor.fetchone()
+        if not sample:
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+
+        cursor.execute("""
+            SELECT o."observationID", o."taxonID", t."scientificName" AS taxon_name, o.verification_status
+            FROM observations o
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            WHERE o."eventID" = %s
+            ORDER BY t."scientificName";
+        """, (event_id,))
+        observations = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT j."Type" AS type, j."litID" AS lit_id,
+                   CONCAT_WS(', ', l."authorName", l."yearPublished", l."articleTitle", l."publicationTitle") AS formatted_ref
+            FROM sample_literature_junction j
+            JOIN literature l ON j."litID" = l."litID"
+            WHERE j."eventID" = %s;
+        """, (event_id,))
+        literature_links = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT j.type, j.project_id, p.project_name
+            FROM sample_project_junction j
+            JOIN recording_projects p ON j.project_id = p.project_id
+            WHERE j."eventID" = %s;
+        """, (event_id,))
+        project_links = cursor.fetchall()
+
+        return {
+            "sample": sample,
+            "observations": observations,
+            "literature_links": literature_links,
+            "project_links": project_links
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/v1/admin/samples/{event_id}")
+def edit_sample(event_id: str, payload: SampleEditSubmission, user: dict = Depends(require_superuser)):
+    """
+    Full-replace edit of a sample's fields. If the coordinates
+    change, geom_wgs84 is rebuilt to match (or cleared if coordinates
+    are removed) - the same way it's built at submission time - so it
+    never goes silently stale.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM samples WHERE "eventID" = %s;', (event_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+
+        new_values = {
+            "samplingLocation": payload.samplingLocation,
+            "decimalLatitude": payload.decimalLatitude,
+            "decimalLongitude": payload.decimalLongitude,
+            "coordinateuncertaintyinmeters": payload.coordinateuncertaintyinmeters,
+            "bngx": payload.bngx,
+            "bngy": payload.bngy,
+            "gridRef": payload.gridRef,
+            "earliestDateCollected": payload.earliestDateCollected,
+            "latestDateCollected": payload.latestDateCollected,
+            "habitat": payload.habitat,
+            "microhabitat": payload.microhabitat,
+            "SHADe": payload.SHADe,
+            "samplingProtocol": payload.samplingProtocol,
+            "samplesizeValue": payload.samplesizeValue,
+            "samplesizeUnit": payload.samplesizeUnit,
+            "recordedBy": payload.recordedBy,
+            "eventRemarks": payload.eventRemarks,
+            "datarestricted": payload.datarestricted,
+            "licenceHolder": payload.licenceHolder,
+            "dataSource[free text]": payload.dataSource,
+        }
+
+        field_changes = _diff_row(current, new_values)
+        if not field_changes:
+            return {"eventID": event_id, "message": "No changes to save.", "changed_fields": []}
+
+        cursor.execute("""
+            UPDATE samples SET
+                "samplingLocation" = %s, "decimalLatitude" = %s, "decimalLongitude" = %s,
+                "coordinateuncertaintyinmeters" = %s, "bngx" = %s, "bngy" = %s, "gridRef" = %s,
+                "earliestDateCollected" = %s, "latestDateCollected" = %s, "habitat" = %s,
+                "microhabitat" = %s, "SHADe" = %s, "samplingProtocol" = %s,
+                "samplesizeValue" = %s, "samplesizeUnit" = %s, "recordedBy" = %s, "eventRemarks" = %s,
+                "datarestricted" = %s, "licenceHolder" = %s, "dataSource[free text]" = %s
+            WHERE "eventID" = %s;
+        """, (
+            new_values["samplingLocation"], new_values["decimalLatitude"], new_values["decimalLongitude"],
+            new_values["coordinateuncertaintyinmeters"], new_values["bngx"], new_values["bngy"], new_values["gridRef"],
+            new_values["earliestDateCollected"], new_values["latestDateCollected"], new_values["habitat"],
+            new_values["microhabitat"], new_values["SHADe"], new_values["samplingProtocol"],
+            new_values["samplesizeValue"], new_values["samplesizeUnit"], new_values["recordedBy"], new_values["eventRemarks"],
+            new_values["datarestricted"], new_values["licenceHolder"], new_values["dataSource[free text]"],
+            event_id
+        ))
+
+        if "decimalLatitude" in field_changes or "decimalLongitude" in field_changes:
+            if new_values["decimalLatitude"] is not None and new_values["decimalLongitude"] is not None:
+                cursor.execute("""
+                    UPDATE samples SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s::float8, %s::float8), 4326)
+                    WHERE "eventID" = %s;
+                """, (new_values["decimalLongitude"], new_values["decimalLatitude"], event_id))
+            else:
+                cursor.execute('UPDATE samples SET geom_wgs84 = NULL WHERE "eventID" = %s;', (event_id,))
+
+        _log_admin_action(cursor, user, "sample_edit", "samples", event_id, field_changes, payload.notes)
+        conn.commit()
+        return {"eventID": event_id, "message": "Saved.", "changed_fields": list(field_changes.keys())}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save sample: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/admin/samples/{event_id}/delete-preview")
+def preview_sample_delete(event_id: str, user: dict = Depends(require_superuser)):
+    """
+    Samples don't cascade-delete their observations - an observation
+    is a real scientific record in its own right, so it must be moved
+    or deleted individually first. This tells the confirmation
+    exactly what's blocking deletion.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (event_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+        cursor.execute('SELECT COUNT(*) AS n FROM observations WHERE "eventID" = %s;', (event_id,))
+        obs_count = cursor.fetchone()["n"]
+        return {"observations": obs_count, "can_delete": obs_count == 0}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/samples/{event_id}")
+def delete_sample(event_id: str, user: dict = Depends(require_superuser)):
+    """
+    Deletes a sample. Blocked while any observations still reference
+    it; its own literature/project source links are cleaned up
+    automatically since nothing else depends on them.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (event_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+        cursor.execute('SELECT COUNT(*) AS n FROM observations WHERE "eventID" = %s;', (event_id,))
+        obs_count = cursor.fetchone()["n"]
+        if obs_count:
+            raise HTTPException(status_code=400, detail=f"Cannot delete - {obs_count} observation(s) still belong to this sample. Move or delete those first.")
+
+        cursor.execute('DELETE FROM sample_literature_junction WHERE "eventID" = %s;', (event_id,))
+        cursor.execute('DELETE FROM sample_project_junction WHERE "eventID" = %s;', (event_id,))
+        cursor.execute('DELETE FROM samples WHERE "eventID" = %s;', (event_id,))
+
+        _log_admin_action(cursor, user, "sample_delete", "samples", event_id, {})
+        conn.commit()
+        return {"message": "Sample deleted."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete sample: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/samples/{event_id}/duplicate")
+def duplicate_sample(event_id: str, payload: SampleDuplicateSubmission, user: dict = Depends(require_superuser)):
+    """
+    Creates a new sample with the same field values (a fresh
+    WEB-prefixed eventID, fresh submitted_by/entered_by/entered_at) -
+    typically used to split one over-broad sample into several, one
+    per microhabitat, before editing each copy's microhabitat field
+    and moving or duplicating the relevant observations onto it. Does
+    not copy observations, literature links, or project links - those
+    are left for the superuser to attach individually to whichever
+    copy they actually belong on.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM samples WHERE "eventID" = %s;', (event_id,))
+        source = cursor.fetchone()
+        if not source:
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+
+        cursor.execute("SELECT nextval('web_eventid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO samples (
+                "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
+                "coordinateuncertaintyinmeters", "bngx", "bngy", "gridRef",
+                "earliestDateCollected", "latestDateCollected", "habitat", "microhabitat",
+                "SHADe", "samplingProtocol", "samplesizeValue", "samplesizeUnit", "recordedBy",
+                "eventRemarks", "datarestricted", "licenceHolder", "dataSource[free text]",
+                submitted_by_user_id, entered_by, entered_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            );
+        """, (
+            new_id, source["samplingLocation"], source["decimalLatitude"], source["decimalLongitude"],
+            source["coordinateuncertaintyinmeters"], source["bngx"], source["bngy"], source["gridRef"],
+            source["earliestDateCollected"], source["latestDateCollected"], source["habitat"], source["microhabitat"],
+            source["SHADe"], source["samplingProtocol"], source["samplesizeValue"], source["samplesizeUnit"], source["recordedBy"],
+            source["eventRemarks"], source["datarestricted"], source["licenceHolder"], source["dataSource[free text]"],
+            user["user_id"], user["display_name"]
+        ))
+
+        if source["decimalLatitude"] is not None and source["decimalLongitude"] is not None:
+            cursor.execute("""
+                UPDATE samples SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                WHERE "eventID" = %s;
+            """, (source["decimalLongitude"], source["decimalLatitude"], new_id))
+
+        _log_admin_action(cursor, user, "sample_duplicate", "samples", new_id, {"duplicated_from": event_id}, payload.notes)
+        conn.commit()
+        return {"eventID": new_id, "message": f"Duplicated from {event_id}."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not duplicate sample: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/samples/{event_id}/literature-links")
+def add_sample_literature_link(event_id: str, payload: SampleLiteratureLinkSubmission, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (event_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+        cursor.execute('SELECT 1 FROM literature WHERE "litID" = %s;', (payload.litID,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No literature entry found with litID {payload.litID}")
+        cursor.execute("""
+            SELECT 1 FROM sample_literature_junction WHERE "eventID" = %s AND "Type" = %s AND "litID" = %s;
+        """, (event_id, payload.Type, payload.litID))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="This sample is already linked to that reference with that type")
+
+        cursor.execute("""
+            INSERT INTO sample_literature_junction ("eventID", "Type", "litID") VALUES (%s, %s, %s);
+        """, (event_id, payload.Type, payload.litID))
+        _log_admin_action(cursor, user, "sample_literature_link_added", "sample_literature_junction", event_id,
+                           {"litID": payload.litID, "Type": payload.Type}, payload.notes)
+        conn.commit()
+        return {"message": "Literature link added."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not add literature link: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/samples/{event_id}/literature-links")
+def remove_sample_literature_link(
+    event_id: str,
+    lit_id: str = Query(...),
+    link_type: str = Query(..., alias="type"),
+    user: dict = Depends(require_superuser)
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            DELETE FROM sample_literature_junction WHERE "eventID" = %s AND "Type" = %s AND "litID" = %s;
+        """, (event_id, link_type, lit_id))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="No matching literature link found to remove")
+        _log_admin_action(cursor, user, "sample_literature_link_removed", "sample_literature_junction", event_id,
+                           {"litID": lit_id, "Type": link_type})
+        conn.commit()
+        return {"message": "Literature link removed."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not remove literature link: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/samples/{event_id}/projects")
+def add_sample_project_link(event_id: str, payload: SampleProjectLinkSubmission, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (event_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+        cursor.execute("SELECT 1 FROM recording_projects WHERE project_id = %s;", (payload.project_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No project found with id {payload.project_id}")
+        cursor.execute("""
+            SELECT 1 FROM sample_project_junction WHERE "eventID" = %s AND project_id = %s AND type = %s;
+        """, (event_id, payload.project_id, payload.type))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="This sample is already linked to that project with that type")
+
+        cursor.execute("""
+            INSERT INTO sample_project_junction ("eventID", project_id, type) VALUES (%s, %s, %s);
+        """, (event_id, payload.project_id, payload.type))
+        _log_admin_action(cursor, user, "sample_project_link_added", "sample_project_junction", event_id,
+                           {"project_id": payload.project_id, "type": payload.type}, payload.notes)
+        conn.commit()
+        return {"message": "Project link added."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not add project link: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/samples/{event_id}/projects")
+def remove_sample_project_link(
+    event_id: str,
+    project_id: int = Query(...),
+    link_type: str = Query(..., alias="type"),
+    user: dict = Depends(require_superuser)
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            DELETE FROM sample_project_junction WHERE "eventID" = %s AND project_id = %s AND type = %s;
+        """, (event_id, project_id, link_type))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="No matching project link found to remove")
+        _log_admin_action(cursor, user, "sample_project_link_removed", "sample_project_junction", event_id,
+                           {"project_id": project_id, "type": link_type})
+        conn.commit()
+        return {"message": "Project link removed."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not remove project link: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/samples/{event_id}/observations")
+def admin_create_observation(event_id: str, payload: ObservationEditSubmission, user: dict = Depends(require_superuser)):
+    """
+    Superuser quick-create of a brand new observation directly under
+    a sample - bypasses the ownership check the contributor-facing
+    /api/v1/submit/observation enforces, since a superuser may
+    legitimately be adding to someone else's sample.
+    """
+    if not payload.taxonID:
+        raise HTTPException(status_code=400, detail="taxonID is required")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (event_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No sample found with eventID {event_id}")
+        cursor.execute('SELECT 1 FROM taxonomy WHERE "taxonID" = %s;', (payload.taxonID,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No taxon found with taxonID {payload.taxonID}")
+
+        cursor.execute("SELECT nextval('web_observationid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO observations (
+                "observationID", "eventID", "taxonID", "identifiedBy",
+                "identificationVerificationStatus", "identificationRemarks",
+                "collectionID", "catalogNumber", "basisOfRecord", "idTechnique", "litID",
+                "idText[free_text]", "occurrenceRemarks", share_with_nbn, share_with_gbif,
+                coordinate_uncertainty_meters, verification_status, submitted_by_user_id, entered_by, entered_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
+            );
+        """, (
+            new_id, event_id, payload.taxonID, payload.identifiedBy,
+            payload.identificationVerificationStatus, payload.identificationRemarks,
+            payload.collectionID, payload.catalogNumber, payload.basisOfRecord, payload.idTechnique, payload.litID,
+            payload.idText, payload.occurrenceRemarks, payload.share_with_nbn, payload.share_with_gbif,
+            payload.coordinate_uncertainty_meters, user["user_id"], user["display_name"]
+        ))
+        _log_admin_action(cursor, user, "observation_create", "observations", new_id, {"eventID": event_id, "taxonID": payload.taxonID}, payload.notes)
+        conn.commit()
+        return {"observationID": new_id, "message": "Observation created."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ---------- observations ----------
+
+@app.get("/api/v1/admin/observations")
+def admin_list_observations(
+    taxon_id: Optional[str] = Query(None),
+    event_id: Optional[str] = Query(None),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(require_superuser)
+):
+    """
+    Lists observations filtered by taxon and/or sample - used to
+    browse into a specific taxon's observations without needing to
+    know an observationID up front.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        where = []
+        params = []
+        if taxon_id:
+            where.append('o."taxonID" = %s')
+            params.append(taxon_id)
+        if event_id:
+            where.append('o."eventID" = %s')
+            params.append(event_id)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        cursor.execute(f"""
+            SELECT o."observationID", o."eventID", o."taxonID", t."scientificName" AS taxon_name,
+                   o.verification_status, s."samplingLocation", s."earliestDateCollected"
+            FROM observations o
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            LEFT JOIN samples s ON o."eventID" = s."eventID"
+            {where_sql}
+            ORDER BY s."earliestDateCollected" DESC NULLS LAST
+            LIMIT %s OFFSET %s;
+        """, params + [limit, offset])
+        rows = cursor.fetchall()
+        cursor.execute(f"SELECT COUNT(*) AS total FROM observations o {where_sql};", params)
+        total = cursor.fetchone()["total"]
+        return {"results": rows, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/admin/observations/{observation_id}")
+def get_admin_observation_detail(observation_id: str, user: dict = Depends(require_superuser)):
+    """
+    Full observation record plus its sample summary, taxon name, its
+    demographic groups (each with their own specimens nested inside),
+    and its literature links.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT o.*, t."scientificName" AS taxon_name,
+                   s."samplingLocation" AS sample_location, s."earliestDateCollected" AS sample_date
+            FROM observations o
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            LEFT JOIN samples s ON o."eventID" = s."eventID"
+            WHERE o."observationID" = %s;
+        """, (observation_id,))
+        obs = cursor.fetchone()
+        if not obs:
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+
+        cursor.execute("""
+            SELECT * FROM observation_demographics WHERE "observationID" = %s ORDER BY "demographicID";
+        """, (observation_id,))
+        demographics = cursor.fetchall()
+        for d in demographics:
+            cursor.execute("""
+                SELECT * FROM specimens WHERE "demographicID" = %s ORDER BY "specimenID";
+            """, (d["demographicID"],))
+            d["specimens"] = cursor.fetchall()
+
+        cursor.execute("""
+            SELECT j.type, j."litID" AS lit_id,
+                   CONCAT_WS(', ', l."authorName", l."yearPublished", l."articleTitle", l."publicationTitle") AS formatted_ref
+            FROM observation_literature_junction j
+            JOIN literature l ON j."litID" = l."litID"
+            WHERE j."observationID" = %s;
+        """, (observation_id,))
+        literature_links = cursor.fetchall()
+
+        return {"observation": obs, "demographics": demographics, "literature_links": literature_links}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/v1/admin/observations/{observation_id}")
+def edit_observation(observation_id: str, payload: ObservationEditSubmission, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM observations WHERE "observationID" = %s;', (observation_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+
+        if payload.eventID and payload.eventID != current["eventID"]:
+            cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (payload.eventID,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail="eventID does not match any sample")
+        if payload.taxonID and payload.taxonID != current["taxonID"]:
+            cursor.execute('SELECT 1 FROM taxonomy WHERE "taxonID" = %s;', (payload.taxonID,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail="taxonID does not match any taxon")
+        if payload.litID:
+            cursor.execute('SELECT 1 FROM literature WHERE "litID" = %s;', (payload.litID,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=400, detail="litID does not match any literature entry")
+
+        new_values = {
+            "eventID": payload.eventID or current["eventID"],
+            "taxonID": payload.taxonID or current["taxonID"],
+            "identifiedBy": payload.identifiedBy,
+            "identificationVerificationStatus": payload.identificationVerificationStatus,
+            "identificationRemarks": payload.identificationRemarks,
+            "collectionID": payload.collectionID,
+            "catalogNumber": payload.catalogNumber,
+            "basisOfRecord": payload.basisOfRecord,
+            "idTechnique": payload.idTechnique,
+            "litID": payload.litID,
+            "idText[free_text]": payload.idText,
+            "occurrenceRemarks": payload.occurrenceRemarks,
+            "share_with_nbn": payload.share_with_nbn,
+            "share_with_gbif": payload.share_with_gbif,
+            "coordinate_uncertainty_meters": payload.coordinate_uncertainty_meters,
+        }
+        # A taxon assignment resolves any pending batch-upload
+        # placeholder - once taxonID is set, the proposed name has
+        # served its purpose and shouldn't keep showing as unresolved.
+        clears_placeholder = new_values["taxonID"] and current["proposed_taxon_name"]
+
+        field_changes = _diff_row(current, new_values)
+        if clears_placeholder:
+            field_changes["proposed_taxon_name"] = {"old": current["proposed_taxon_name"], "new": None}
+        if not field_changes:
+            return {"observationID": observation_id, "message": "No changes to save.", "changed_fields": []}
+
+        cursor.execute("""
+            UPDATE observations SET
+                "eventID" = %s, "taxonID" = %s, "identifiedBy" = %s,
+                "identificationVerificationStatus" = %s, "identificationRemarks" = %s,
+                "collectionID" = %s, "catalogNumber" = %s, "basisOfRecord" = %s, "idTechnique" = %s, "litID" = %s,
+                "idText[free_text]" = %s, "occurrenceRemarks" = %s, share_with_nbn = %s, share_with_gbif = %s,
+                coordinate_uncertainty_meters = %s, proposed_taxon_name = %s
+            WHERE "observationID" = %s;
+        """, (
+            new_values["eventID"], new_values["taxonID"], new_values["identifiedBy"],
+            new_values["identificationVerificationStatus"], new_values["identificationRemarks"],
+            new_values["collectionID"], new_values["catalogNumber"], new_values["basisOfRecord"], new_values["idTechnique"], new_values["litID"],
+            new_values["idText[free_text]"], new_values["occurrenceRemarks"], new_values["share_with_nbn"], new_values["share_with_gbif"],
+            new_values["coordinate_uncertainty_meters"], (None if clears_placeholder else current["proposed_taxon_name"]), observation_id
+        ))
+
+        _log_admin_action(cursor, user, "observation_edit", "observations", observation_id, field_changes, payload.notes)
+        conn.commit()
+        return {"observationID": observation_id, "message": "Saved.", "changed_fields": list(field_changes.keys())}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/api/v1/admin/observations/{observation_id}/delete-preview")
+def preview_observation_delete(observation_id: str, user: dict = Depends(require_superuser)):
+    """
+    Counts everything that cascades if this observation is deleted -
+    demographics, their specimens (and any barcodes on those
+    specimens), media at any of those levels, literature links,
+    verification history, and any taxonomy override - so the
+    confirmation dialog can say exactly what's about to disappear.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM observations WHERE "observationID" = %s;', (observation_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+
+        cursor.execute('SELECT "demographicID" FROM observation_demographics WHERE "observationID" = %s;', (observation_id,))
+        demographic_ids = [r["demographicID"] for r in cursor.fetchall()]
+
+        specimen_count = 0
+        barcode_count = 0
+        if demographic_ids:
+            cursor.execute('SELECT "specimenID" FROM specimens WHERE "demographicID" = ANY(%s);', (demographic_ids,))
+            specimen_ids = [r["specimenID"] for r in cursor.fetchall()]
+            specimen_count = len(specimen_ids)
+            if specimen_ids:
+                cursor.execute('SELECT COUNT(*) AS n FROM specimen_barcodes WHERE specimen_id = ANY(%s);', (specimen_ids,))
+                barcode_count = cursor.fetchone()["n"]
+
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_media WHERE observation_id = %s;', (observation_id,))
+        media_count = cursor.fetchone()["n"]
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_literature_junction WHERE "observationID" = %s;', (observation_id,))
+        lit_count = cursor.fetchone()["n"]
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_verification_actions WHERE "observationID" = %s;', (observation_id,))
+        verification_count = cursor.fetchone()["n"]
+
+        return {
+            "demographics": len(demographic_ids),
+            "specimens": specimen_count,
+            "specimen_barcodes": barcode_count,
+            "media": media_count,
+            "literature_links": lit_count,
+            "verification_history": verification_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/observations/{observation_id}")
+def delete_observation(observation_id: str, user: dict = Depends(require_superuser)):
+    """
+    Deletes an observation and everything genuinely subordinate to it
+    (demographics, their specimens and barcodes, media at any of
+    those levels, literature links, verification history, and any
+    taxonomy override) inside one transaction - all-or-nothing, so it
+    can never leave orphaned demographics or specimens behind.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM observations WHERE "observationID" = %s;', (observation_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+
+        cursor.execute('SELECT "demographicID" FROM observation_demographics WHERE "observationID" = %s;', (observation_id,))
+        demographic_ids = [r["demographicID"] for r in cursor.fetchall()]
+
+        if demographic_ids:
+            cursor.execute('SELECT "specimenID" FROM specimens WHERE "demographicID" = ANY(%s);', (demographic_ids,))
+            specimen_ids = [r["specimenID"] for r in cursor.fetchall()]
+            if specimen_ids:
+                cursor.execute('DELETE FROM specimen_barcodes WHERE specimen_id = ANY(%s);', (specimen_ids,))
+                cursor.execute('DELETE FROM observation_media WHERE specimen_id = ANY(%s);', (specimen_ids,))
+                cursor.execute('DELETE FROM specimens WHERE "specimenID" = ANY(%s);', (specimen_ids,))
+            cursor.execute('DELETE FROM observation_media WHERE demographic_id = ANY(%s);', (demographic_ids,))
+            cursor.execute('DELETE FROM observation_demographics WHERE "demographicID" = ANY(%s);', (demographic_ids,))
+
+        cursor.execute('DELETE FROM observation_media WHERE observation_id = %s;', (observation_id,))
+        cursor.execute('DELETE FROM observation_literature_junction WHERE "observationID" = %s;', (observation_id,))
+        cursor.execute('DELETE FROM observation_verification_actions WHERE "observationID" = %s;', (observation_id,))
+        cursor.execute('DELETE FROM observation_taxonomy_override WHERE observation_id = %s;', (observation_id,))
+        cursor.execute('DELETE FROM observations WHERE "observationID" = %s;', (observation_id,))
+
+        _log_admin_action(cursor, user, "observation_delete", "observations", observation_id,
+                           {"demographics_deleted": len(demographic_ids)})
+        conn.commit()
+        return {"message": "Observation deleted."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/observations/{observation_id}/duplicate")
+def duplicate_observation(observation_id: str, payload: ObservationDuplicateSubmission, user: dict = Depends(require_superuser)):
+    """
+    Creates a new observation copying this one's fields - typically
+    used together with sample duplication to split a single
+    over-broad record into separate ones per microhabitat (or similar
+    split). new_event_id/new_taxon_id let the copy point somewhere
+    different straight away; copy_demographics also deep-copies its
+    demographic groups and their specimens onto the new observation.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM observations WHERE "observationID" = %s;', (observation_id,))
+        source = cursor.fetchone()
+        if not source:
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+
+        target_event_id = payload.new_event_id or source["eventID"]
+        target_taxon_id = payload.new_taxon_id or source["taxonID"]
+        cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (target_event_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=400, detail="new_event_id does not match any sample")
+        cursor.execute('SELECT 1 FROM taxonomy WHERE "taxonID" = %s;', (target_taxon_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=400, detail="new_taxon_id does not match any taxon")
+
+        cursor.execute("SELECT nextval('web_observationid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO observations (
+                "observationID", "eventID", "taxonID", "identifiedBy",
+                "identificationVerificationStatus", "identificationRemarks",
+                "collectionID", "catalogNumber", "basisOfRecord", "idTechnique", "litID",
+                "idText[free_text]", "occurrenceRemarks", share_with_nbn, share_with_gbif,
+                coordinate_uncertainty_meters, verification_status, submitted_by_user_id, entered_by, entered_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
+            );
+        """, (
+            new_id, target_event_id, target_taxon_id, source["identifiedBy"],
+            source["identificationVerificationStatus"], source["identificationRemarks"],
+            source["collectionID"], source["catalogNumber"], source["basisOfRecord"], source["idTechnique"], source["litID"],
+            source["idText[free_text]"], source["occurrenceRemarks"], source["share_with_nbn"], source["share_with_gbif"],
+            source["coordinate_uncertainty_meters"], user["user_id"], user["display_name"]
+        ))
+
+        copied_demographics = 0
+        copied_specimens = 0
+        if payload.copy_demographics:
+            cursor.execute('SELECT * FROM observation_demographics WHERE "observationID" = %s;', (observation_id,))
+            for demo in cursor.fetchall():
+                cursor.execute("SELECT nextval('web_demographicid_seq');")
+                new_demo_id = f"WEB-{cursor.fetchone()['nextval']}"
+                cursor.execute("""
+                    INSERT INTO observation_demographics (
+                        "demographicID", "observationID", sex, lifestage, count,
+                        density, "densityUnit", "minCount", "maxCount", "countDescription"
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """, (
+                    new_demo_id, new_id, demo["sex"], demo["lifestage"], demo["count"],
+                    demo["density"], demo["densityUnit"], demo["minCount"], demo["maxCount"], demo["countDescription"]
+                ))
+                copied_demographics += 1
+
+                cursor.execute('SELECT * FROM specimens WHERE "demographicID" = %s;', (demo["demographicID"],))
+                for spec in cursor.fetchall():
+                    cursor.execute("SELECT nextval('web_specimenid_seq');")
+                    new_spec_id = f"WEB-{cursor.fetchone()['nextval']}"
+                    cursor.execute("""
+                        INSERT INTO specimens (
+                            "specimenID", "demographicID", "specCount", "specLocation",
+                            "specRef", "specPreservation", "specType", "specComments"
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                    """, (
+                        new_spec_id, new_demo_id, spec["specCount"], spec["specLocation"],
+                        spec["specRef"], spec["specPreservation"], spec["specType"], spec["specComments"]
+                    ))
+                    copied_specimens += 1
+
+        _log_admin_action(cursor, user, "observation_duplicate", "observations", new_id, {
+            "duplicated_from": observation_id, "eventID": target_event_id, "taxonID": target_taxon_id,
+            "copied_demographics": copied_demographics, "copied_specimens": copied_specimens
+        }, payload.notes)
+        conn.commit()
+        return {
+            "observationID": new_id, "message": f"Duplicated from {observation_id}.",
+            "copied_demographics": copied_demographics, "copied_specimens": copied_specimens
+        }
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not duplicate observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/admin/observations/{observation_id}/literature-links")
+def add_observation_literature_link(observation_id: str, payload: ObservationLiteratureLinkSubmission, user: dict = Depends(require_superuser)):
+    if payload.type not in VALID_OBSERVATION_LITERATURE_TYPES:
+        raise HTTPException(status_code=400, detail=f"type must be one of {sorted(VALID_OBSERVATION_LITERATURE_TYPES)}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM observations WHERE "observationID" = %s;', (observation_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+        cursor.execute('SELECT 1 FROM literature WHERE "litID" = %s;', (payload.litID,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No literature entry found with litID {payload.litID}")
+        cursor.execute("""
+            SELECT 1 FROM observation_literature_junction WHERE "observationID" = %s AND type = %s AND "litID" = %s;
+        """, (observation_id, payload.type, payload.litID))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="This observation is already linked to that reference with that type")
+
+        cursor.execute("""
+            INSERT INTO observation_literature_junction ("observationID", type, "litID") VALUES (%s, %s, %s);
+        """, (observation_id, payload.type, payload.litID))
+        _log_admin_action(cursor, user, "observation_literature_link_added", "observation_literature_junction", observation_id,
+                           {"litID": payload.litID, "type": payload.type}, payload.notes)
+        conn.commit()
+        return {"message": "Literature link added."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not add literature link: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/observations/{observation_id}/literature-links")
+def remove_observation_literature_link(
+    observation_id: str,
+    lit_id: str = Query(...),
+    link_type: str = Query(..., alias="type"),
+    user: dict = Depends(require_superuser)
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            DELETE FROM observation_literature_junction WHERE "observationID" = %s AND type = %s AND "litID" = %s;
+        """, (observation_id, link_type, lit_id))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="No matching literature link found to remove")
+        _log_admin_action(cursor, user, "observation_literature_link_removed", "observation_literature_junction", observation_id,
+                           {"litID": lit_id, "type": link_type})
+        conn.commit()
+        return {"message": "Literature link removed."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not remove literature link: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ---------- demographics ----------
+
+@app.post("/api/v1/admin/observations/{observation_id}/demographics")
+def admin_create_demographic(observation_id: str, payload: DemographicEditSubmission, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM observations WHERE "observationID" = %s;', (observation_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+
+        cursor.execute("SELECT nextval('web_demographicid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO observation_demographics (
+                "demographicID", "observationID", sex, lifestage, count,
+                density, "densityUnit", "minCount", "maxCount", "countDescription"
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+        """, (
+            new_id, observation_id, payload.sex, payload.lifestage, payload.count,
+            payload.density, payload.densityUnit, payload.minCount, payload.maxCount, payload.countDescription
+        ))
+        _log_admin_action(cursor, user, "demographic_create", "observation_demographics", new_id, {"observationID": observation_id}, payload.notes)
+        conn.commit()
+        return {"demographicID": new_id, "message": "Demographic group added."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create demographic group: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/v1/admin/demographics/{demographic_id}")
+def edit_demographic(demographic_id: str, payload: DemographicEditSubmission, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM observation_demographics WHERE "demographicID" = %s;', (demographic_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail=f"No demographic group found with demographicID {demographic_id}")
+
+        new_values = {
+            "sex": payload.sex, "lifestage": payload.lifestage, "count": payload.count,
+            "density": payload.density, "densityUnit": payload.densityUnit,
+            "minCount": payload.minCount, "maxCount": payload.maxCount, "countDescription": payload.countDescription
+        }
+        field_changes = _diff_row(current, new_values)
+        if not field_changes:
+            return {"demographicID": demographic_id, "message": "No changes to save.", "changed_fields": []}
+
+        cursor.execute("""
+            UPDATE observation_demographics SET
+                sex = %s, lifestage = %s, count = %s, density = %s, "densityUnit" = %s,
+                "minCount" = %s, "maxCount" = %s, "countDescription" = %s
+            WHERE "demographicID" = %s;
+        """, (
+            new_values["sex"], new_values["lifestage"], new_values["count"], new_values["density"], new_values["densityUnit"],
+            new_values["minCount"], new_values["maxCount"], new_values["countDescription"], demographic_id
+        ))
+        _log_admin_action(cursor, user, "demographic_edit", "observation_demographics", demographic_id, field_changes, payload.notes)
+        conn.commit()
+        return {"demographicID": demographic_id, "message": "Saved.", "changed_fields": list(field_changes.keys())}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save demographic group: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/demographics/{demographic_id}")
+def delete_demographic(demographic_id: str, user: dict = Depends(require_superuser)):
+    """
+    Deletes a demographic group and its specimens (and any barcodes
+    or media attached to those specimens, plus media attached to the
+    demographic itself) in one transaction.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM observation_demographics WHERE "demographicID" = %s;', (demographic_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No demographic group found with demographicID {demographic_id}")
+
+        cursor.execute('SELECT "specimenID" FROM specimens WHERE "demographicID" = %s;', (demographic_id,))
+        specimen_ids = [r["specimenID"] for r in cursor.fetchall()]
+        if specimen_ids:
+            cursor.execute('DELETE FROM specimen_barcodes WHERE specimen_id = ANY(%s);', (specimen_ids,))
+            cursor.execute('DELETE FROM observation_media WHERE specimen_id = ANY(%s);', (specimen_ids,))
+            cursor.execute('DELETE FROM specimens WHERE "specimenID" = ANY(%s);', (specimen_ids,))
+        cursor.execute('DELETE FROM observation_media WHERE demographic_id = %s;', (demographic_id,))
+        cursor.execute('DELETE FROM observation_demographics WHERE "demographicID" = %s;', (demographic_id,))
+
+        _log_admin_action(cursor, user, "demographic_delete", "observation_demographics", demographic_id,
+                           {"specimens_deleted": len(specimen_ids)})
+        conn.commit()
+        return {"message": "Demographic group deleted."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete demographic group: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ---------- specimens ----------
+
+@app.post("/api/v1/admin/demographics/{demographic_id}/specimens")
+def admin_create_specimen(demographic_id: str, payload: SpecimenEditSubmission, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM observation_demographics WHERE "demographicID" = %s;', (demographic_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No demographic group found with demographicID {demographic_id}")
+
+        cursor.execute("SELECT nextval('web_specimenid_seq');")
+        new_id = f"WEB-{cursor.fetchone()['nextval']}"
+
+        cursor.execute("""
+            INSERT INTO specimens (
+                "specimenID", "demographicID", "specCount", "specLocation",
+                "specRef", "specPreservation", "specType", "specComments"
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+        """, (
+            new_id, demographic_id, payload.specCount, payload.specLocation,
+            payload.specRef, payload.specPreservation, payload.specType, payload.specComments
+        ))
+        _log_admin_action(cursor, user, "specimen_create", "specimens", new_id, {"demographicID": demographic_id}, payload.notes)
+        conn.commit()
+        return {"specimenID": new_id, "message": "Specimen added."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not create specimen: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/v1/admin/specimens/{specimen_id}")
+def edit_specimen(specimen_id: str, payload: SpecimenEditSubmission, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM specimens WHERE "specimenID" = %s;', (specimen_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail=f"No specimen found with specimenID {specimen_id}")
+
+        new_values = {
+            "specCount": payload.specCount, "specLocation": payload.specLocation, "specRef": payload.specRef,
+            "specPreservation": payload.specPreservation, "specType": payload.specType, "specComments": payload.specComments
+        }
+        field_changes = _diff_row(current, new_values)
+        if not field_changes:
+            return {"specimenID": specimen_id, "message": "No changes to save.", "changed_fields": []}
+
+        cursor.execute("""
+            UPDATE specimens SET
+                "specCount" = %s, "specLocation" = %s, "specRef" = %s,
+                "specPreservation" = %s, "specType" = %s, "specComments" = %s
+            WHERE "specimenID" = %s;
+        """, (
+            new_values["specCount"], new_values["specLocation"], new_values["specRef"],
+            new_values["specPreservation"], new_values["specType"], new_values["specComments"], specimen_id
+        ))
+        _log_admin_action(cursor, user, "specimen_edit", "specimens", specimen_id, field_changes, payload.notes)
+        conn.commit()
+        return {"specimenID": specimen_id, "message": "Saved.", "changed_fields": list(field_changes.keys())}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save specimen: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/admin/specimens/{specimen_id}")
+def delete_specimen(specimen_id: str, user: dict = Depends(require_superuser)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT 1 FROM specimens WHERE "specimenID" = %s;', (specimen_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"No specimen found with specimenID {specimen_id}")
+
+        cursor.execute('DELETE FROM specimen_barcodes WHERE specimen_id = %s;', (specimen_id,))
+        cursor.execute('DELETE FROM observation_media WHERE specimen_id = %s;', (specimen_id,))
+        cursor.execute('DELETE FROM specimens WHERE "specimenID" = %s;', (specimen_id,))
+
+        _log_admin_action(cursor, user, "specimen_delete", "specimens", specimen_id, {})
+        conn.commit()
+        return {"message": "Specimen deleted."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete specimen: {str(e)}")
     finally:
         cursor.close()
         conn.close()
@@ -1981,4 +4586,3 @@ def get_live_schema(user: dict = Depends(require_superuser)):
     finally:
         cursor.close()
         conn.close()
-
