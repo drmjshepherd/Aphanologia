@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia - Record Viewer</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; color: #212529; }
+        #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        #header h1 { margin: 0; font-size: 1.2rem; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #header a.nav-link:hover { text-decoration: underline; }
+        #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
+        #auth-status a { color: white; }
+
+        #page { max-width: 900px; margin: 0 auto; padding: 24px 20px 80px; }
+        h2 { color: #1b4332; font-size: 1.1rem; margin: 0 0 4px; }
+        h3 { color: #2d6a4f; font-size: 0.9rem; margin: 18px 0 8px; }
+        .subtext { color: #6c757d; font-size: 0.85rem; margin: 0 0 16px; }
+        .panel { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 18px 20px; margin-bottom: 20px; }
+        .nested-panel { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 12px 16px; margin-top: 10px; }
+        .nested-panel-deep { background: #f1f3f5; border: 1px solid #dee2e6; border-radius: 6px; padding: 10px 14px; margin-top: 8px; }
+
+        #edit-mode-btn {
+            display: inline-block; margin-top: 12px; background: #fff8e6; border: 2px solid #d4a017;
+            color: #7a5c00; padding: 9px 18px; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.88rem;
+        }
+        #edit-mode-btn:hover { background: #fdecc4; }
+
+        .field-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 20px; margin-bottom: 10px; }
+        .field-display dt { font-weight: 600; font-size: 0.74rem; color: #2d6a4f; text-transform: uppercase; letter-spacing: 0.02em; }
+        .field-display dd { margin: 2px 0 0; font-size: 0.92rem; color: #212529; }
+        .field-display dd.empty { color: #adb5bd; font-style: italic; }
+        dl.field-display { margin: 0; }
+        .full-width-field { grid-column: 1 / -1; }
+
+        .taxon-heading { font-style: italic; color: #1b4332; font-size: 1.3rem; }
+        .taxon-authorship { font-style: normal; color: #6c757d; font-size: 0.9rem; }
+
+        .row-item { border-top: 1px solid #f1f3f5; padding: 10px 0; }
+        .row-item:first-child { border-top: none; }
+        .no-items { color: #adb5bd; font-size: 0.85rem; font-style: italic; }
+        .lit-item { font-size: 0.86rem; margin-bottom: 6px; }
+        .lit-item .lit-type { color: #6c757d; font-size: 0.76rem; }
+        .lit-item a { color: #2d6a4f; }
+
+        .verification-badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 0.78rem; background: #f1f3f5; color: #495057; }
+        .error-message { text-align: center; padding: 60px 20px; color: #495057; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <a class="title-link" href="/"><h1>Aphanologia</h1></a>
+        <a class="nav-link" href="/map">Map</a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/literature">Literature</a>
+        <div id="auth-status">Checking sign-in status&hellip;</div>
+    </div>
+
+    <div id="page">
+        <div id="error-container"></div>
+        <div id="content" style="display:none;">
+            <h2>Record</h2>
+            <p class="subtext" id="record-subtitle"></p>
+            <a id="edit-mode-btn" style="display:none;">Switch to editing mode</a>
+
+            <div class="panel" id="observation-panel"></div>
+            <div class="panel" id="sample-panel"></div>
+        </div>
+    </div>
+
+    <script>
+        let isSuperuser = false;
+        let currentObservationId = null;
+
+        function fieldDisplay(label, value) {
+            const isEmpty = (value === null || value === undefined || value === '');
+            return `<div><dt>${label}</dt><dd class="${isEmpty ? 'empty' : ''}">${isEmpty ? 'Not recorded' : value}</dd></div>`;
+        }
+
+        function getUrlParam(name) {
+            return new URLSearchParams(window.location.search).get(name);
+        }
+
+        fetch('/api/v1/auth/me')
+            .then(r => r.json())
+            .then(data => {
+                const authEl = document.getElementById('auth-status');
+                if (data.logged_in) {
+                    authEl.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout">Sign out</a>`;
+                } else {
+                    authEl.innerHTML = `<a href="/auth/login">Sign in with Google</a>`;
+                }
+                isSuperuser = data.logged_in && ['superuser', 'hyperuser'].includes(data.role);
+                applyEditButtonVisibility();
+            })
+            .catch(() => {});
+
+        function applyEditButtonVisibility() {
+            const btn = document.getElementById('edit-mode-btn');
+            if (isSuperuser && currentObservationId) {
+                btn.style.display = 'inline-block';
+                btn.href = `/admin/records?observation_id=${encodeURIComponent(currentObservationId)}`;
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        async function loadRecord() {
+            const observationId = getUrlParam('observation_id');
+            if (!observationId) {
+                document.getElementById('error-container').innerHTML = '<div class="error-message">No record specified. Use a "View Record" link from the map or search results.</div>';
+                return;
+            }
+            try {
+                const res = await fetch(`/api/v1/records/view/${encodeURIComponent(observationId)}`);
+                if (!res.ok) {
+                    const data = await res.json();
+                    document.getElementById('error-container').innerHTML = `<div class="error-message">${data.detail || 'Could not load that record.'}</div>`;
+                    return;
+                }
+                const data = await res.json();
+                currentObservationId = observationId;
+                renderRecord(data);
+                document.getElementById('content').style.display = 'block';
+                applyEditButtonVisibility();
+            } catch (err) {
+                document.getElementById('error-container').innerHTML = '<div class="error-message">Could not load that record.</div>';
+            }
+        }
+
+        function renderRecord(data) {
+            const o = data.observation;
+            const s = data.sample;
+
+            document.getElementById('record-subtitle').textContent = `observationID: ${o.observationID} \u00b7 eventID: ${o.eventID}`;
+
+            const obsPanel = document.getElementById('observation-panel');
+            obsPanel.innerHTML = `
+                <div class="taxon-heading">${o.taxon_name || o.taxonID} <span class="taxon-authorship">${o.taxon_authorship || ''}</span></div>
+                <p class="subtext">${o.taxon_rank || ''}</p>
+                <p><span class="verification-badge">${o.verification_status || 'unverified'}</span>${o.verified_by ? ' &middot; verified by ' + o.verified_by : ''}</p>
+
+                <h3>Identification</h3>
+                <dl class="field-display field-grid">
+                    ${fieldDisplay('Identified by', o.identifiedBy)}
+                    ${fieldDisplay('ID verification status', o.identificationVerificationStatus)}
+                    ${fieldDisplay('ID technique', o.idTechnique)}
+                    ${fieldDisplay('ID text', o.idText)}
+                </dl>
+                <dl class="field-display">${fieldDisplay('Identification remarks', o.identificationRemarks)}</dl>
+
+                <h3>Record details</h3>
+                <dl class="field-display field-grid">
+                    ${fieldDisplay('Collection ID', o.collectionID)}
+                    ${fieldDisplay('Catalog number', o.catalogNumber)}
+                    ${fieldDisplay('Basis of record', o.basisOfRecord)}
+                    ${fieldDisplay('Coordinate uncertainty (m)', o.coordinate_uncertainty_meters)}
+                    ${fieldDisplay('Shared with NBN', o.share_with_nbn === true ? 'Yes' : (o.share_with_nbn === false ? 'No' : null))}
+                    ${fieldDisplay('Shared with GBIF', o.share_with_gbif === true ? 'Yes' : (o.share_with_gbif === false ? 'No' : null))}
+                </dl>
+                <dl class="field-display">${fieldDisplay('Occurrence remarks', o.occurrenceRemarks)}</dl>
+                <p class="subtext">Entered by ${o.entered_by || 'unknown'} on ${o.entered_at ? new Date(o.entered_at).toLocaleDateString() : 'unknown date'}</p>
+
+                <h3>Literature</h3>
+                <div id="obsLiteratureList"></div>
+
+                <h3>Demographic groups</h3>
+                <div id="demographicsView"></div>
+            `;
+            renderLiteratureList('obsLiteratureList', data.observation_literature);
+            renderDemographicsView(data.demographics);
+
+            const samplePanel = document.getElementById('sample-panel');
+            if (s) {
+                samplePanel.innerHTML = `
+                    <h2 style="font-size:1rem;">Sample: ${s.eventID}</h2>
+                    <dl class="field-display field-grid">
+                        ${fieldDisplay('Sampling location', s.samplingLocation)}
+                        ${fieldDisplay('Grid reference', s.gridRef)}
+                        ${fieldDisplay('Latitude', s.decimalLatitude)}
+                        ${fieldDisplay('Longitude', s.decimalLongitude)}
+                        ${fieldDisplay('Earliest date collected', s.earliestDateCollected)}
+                        ${fieldDisplay('Latest date collected', s.latestDateCollected)}
+                        ${fieldDisplay('Recorded by', s.recordedBy)}
+                        ${fieldDisplay('Habitat', s.habitat)}
+                        ${fieldDisplay('Microhabitat', s.microhabitat)}
+                        ${fieldDisplay('SHADe', s.SHADe)}
+                        ${fieldDisplay('Sampling protocol', s.samplingProtocol)}
+                        ${fieldDisplay('Sample size', [s.samplesizeValue, s.samplesizeUnit].filter(Boolean).join(' '))}
+                    </dl>
+                    <dl class="field-display">${fieldDisplay('Event remarks', s.eventRemarks)}</dl>
+
+                    <h3>Literature (source of record)</h3>
+                    <div id="sampleLiteratureList"></div>
+
+                    <h3>Projects</h3>
+                    <div id="sampleProjectsList"></div>
+                `;
+                renderLiteratureList('sampleLiteratureList', data.sample_literature);
+                renderProjectsList('sampleProjectsList', data.sample_projects);
+            } else {
+                samplePanel.innerHTML = '<p class="no-items">No sample information available.</p>';
+            }
+        }
+
+        function renderLiteratureList(containerId, items) {
+            const el = document.getElementById(containerId);
+            if (!items || items.length === 0) { el.innerHTML = '<p class="no-items">None recorded.</p>'; return; }
+            el.innerHTML = items.map(l => `
+                <div class="lit-item">
+                    ${l.sourceURL ? `<a href="${l.sourceURL}" target="_blank" rel="noopener">${l.formatted_ref}</a>` : l.formatted_ref}
+                    <span class="lit-type">(${l.type})</span>
+                </div>
+            `).join('');
+        }
+
+        function renderProjectsList(containerId, items) {
+            const el = document.getElementById(containerId);
+            if (!items || items.length === 0) { el.innerHTML = '<p class="no-items">None recorded.</p>'; return; }
+            el.innerHTML = items.map(p => `<div class="lit-item">${p.project_name} <span class="lit-type">(${p.type})</span></div>`).join('');
+        }
+
+        function renderDemographicsView(demographics) {
+            const el = document.getElementById('demographicsView');
+            if (!demographics || demographics.length === 0) { el.innerHTML = '<p class="no-items">No demographic groups recorded.</p>'; return; }
+            el.innerHTML = '';
+            demographics.forEach(d => {
+                const wrap = document.createElement('div');
+                wrap.className = 'row-item';
+                wrap.innerHTML = `
+                    <dl class="field-display field-grid">
+                        ${fieldDisplay('Sex', d.sex)}
+                        ${fieldDisplay('Lifestage', d.lifestage)}
+                        ${fieldDisplay('Count', d.count)}
+                        ${fieldDisplay('Density', [d.density, d.densityUnit].filter(Boolean).join(' '))}
+                        ${fieldDisplay('Min / max count', (d.minCount || d.maxCount) ? `${d.minCount || '?'} - ${d.maxCount || '?'}` : null)}
+                    </dl>
+                    <dl class="field-display">${fieldDisplay('Count description', d.countDescription)}</dl>
+                    <div class="nested-panel">
+                        <h3 style="margin-top:0; font-size:0.85rem;">Specimens</h3>
+                        <div id="specimensView-${d.demographicID}"></div>
+                    </div>
+                `;
+                el.appendChild(wrap);
+                const specEl = wrap.querySelector(`#specimensView-${d.demographicID}`);
+                if (!d.specimens || d.specimens.length === 0) {
+                    specEl.innerHTML = '<p class="no-items">No specimens recorded.</p>';
+                } else {
+                    d.specimens.forEach(sp => {
+                        const specDiv = document.createElement('div');
+                        specDiv.className = 'nested-panel-deep';
+                        specDiv.innerHTML = `
+                            <dl class="field-display field-grid">
+                                ${fieldDisplay('Count', sp.specCount)}
+                                ${fieldDisplay('Location', sp.specLocation)}
+                                ${fieldDisplay('Reference', sp.specRef)}
+                                ${fieldDisplay('Preservation', sp.specPreservation)}
+                                ${fieldDisplay('Type', sp.specType)}
+                            </dl>
+                            <dl class="field-display">${fieldDisplay('Comments', sp.specComments)}</dl>
+                        `;
+                        specEl.appendChild(specDiv);
+                    });
+                }
+            });
+        }
+
+        loadRecord();
+    </script>
+</body>
+</html>
