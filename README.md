@@ -760,6 +760,9 @@ Thanks.  I think we'll not bother with the application of a key across many nest
 3 (continued). Session edits persistence. This part was working as coded but was too narrowly scoped — it was a plain in-memory list that reset on every reload, not something that lasted "since login" as you wanted. Switched it to sessionStorage (this is your actual deployed app, not a Claude artifact, so that restriction doesn't apply here) — it now survives reloads and navigation within the same browser tab, clearing only when the tab closes.
 
 4. Taxonomy tree remembering state. Turned out taxonomy.html already had almost everything needed — the search feature's goToTaxon() function already knows how to walk to and expand a taxon's full ancestor chain. I just needed to persist the last-viewed taxon (sessionStorage, saved on every selection) and call that same function on page load. An explicit ?taxon_id= in the URL still takes priority, for deliberate deep links.
+
+5. The process for submitting samples was tweaked to allow the option to choose only valid taxa (useful for new observations and uploads) or to allow all - including synonyms and known misapplications (useful for uploading published literature.
+   
 ## Literature editor
 
 5) i need to be able to browse and edit literature records somehow, perhaps searching from the landing page - browsing is available to all users, uploading new literature records (through the observation upload form) is available to contributors, superusers can delete, or assign literature records to taxa.
@@ -780,3 +783,28 @@ Delete is deliberately layered, not uniform: deleting a sample is blocked outrig
 Verification status is intentionally not editable here. verification_status, verified_by, verified_date, verification_notes stay behind the audited Review Queue workflow you already had — the observation form shows the current status with a link over to /review rather than letting this editor silently bypass that trail. Everything else on an observation (taxon, identification fields, catalog info, remarks, sharing flags, primary literature reference) is editable directly.
 
 Two entry points: search by sample (location/recorder/grid ref/eventID), or search by taxon to browse straight into that species' observations — useful if you're working through a reference and want to check/correct every existing record of a species at once.
+
+## Further tweaks and snags
+
+1. Lat/long bug fixed. Root cause confirmed: samples.decimalLatitude/decimalLongitude are actually text columns in your schema, but I'd typed the edit model as float. The diff was comparing the DB's string "51.234" against a resubmitted float 51.234 — never equal, so it always looked changed. Fixed the model, the geometry-recompute SQL (now casts %s::float8 instead of relying on Python floats), and the frontend (sends plain text instead of parsed numbers).
+2. Clickable rows now look clickable. Added a consistent link style (green underline-on-hover) plus a › chevron to every dynamically-loaded row — observations list, demographic groups, specimens, and taxon-search results. Demographic/specimen rows (which expand in place) rotate their chevron to indicate open/closed state; observation rows (which navigate elsewhere) keep a static chevron as an "open" cue.
+3. Observation literature Type is now a real dropdown. Added a controlled vocabulary — Identified using, Determination confirmed in, First published record in, Discussed in — validated server-side and offered as a <select> instead of free text. Happy to add more categories if you think of other reasons an observation might cite a publication.
+4. set map default to being blnk (no records shown) until a taxon is chosen.
+
+## Record viewer for users
+New /records/view page + backend, reachable from a "View Record →" link added to the map popup. It's read-only, public (no login needed), shows sample + observation + demographics + specimens + literature at both levels, and — only for superusers — shows a gold "Switch to editing mode" button linking to /admin/records?observation_id=X. I also taught record_editor.html to accept that ?observation_id= (or ?event_id=) URL param and jump straight to the right record, same pattern as the taxonomy editor's deep links.
+
+[record_viewer.html](record_viewer.html)
+
+## Bulk upload using template generation
+
+Template generation (GET /api/v1/batch/template) — builds a real multi-sheet .xlsx on the fly: Instructions, Samples, Observations, optionally Demographics and Specimens, and a Taxon Lookup reference sheet. Sample/Observation/Demographic Ref columns are proper Excel Tables with dropdown validation pointing at each other, so the cross-sheet linking is genuinely robust in Excel, not just theoretically so.
+
+Validate → Commit, two separate endpoints as planned, with the commit endpoint re-running the exact same validation before writing anything.
+
+The Review Queue's observation list used an inner join to taxonomy, meaning any placeholder observation (no taxon yet) would have silently vanished from the queue entirely rather than showing up for review. This was fixed to a left join, since this is exactly the scenario batch upload now creates routinely.
+Assigning a taxon to a placeholder observation (via the Record Editor or the new Review Queue picker) now correctly clears proposed_taxon_name once resolved, so it doesn't linger in the unresolved-taxa list after being handled.
+
+Review Queue got a new "Unresolved taxa" section — lists every observation with an unmatched name regardless of verification status (important since superuser batch uploads are auto-verified but can still have genuinely unresolved taxa), with inline "assign existing taxon" search and a "create as new taxon" link that pre-fills the Taxonomy Editor's add-new form via the same ?new_taxon_name= pattern already used elsewhere for deep links.
+
+One scope note, consistent with keeping this simple: the Samples sheet captures sourceCategory as free text/dropdown rather than a structured literature/project ID link (picking a specific existing literature reference by ID in a spreadsheet cell isn't practical) — if a batch-uploaded sample needs a proper linked reference, that's a quick follow-up in the Record Editor's already-built sample literature/project panel.
