@@ -794,6 +794,7 @@ Two entry points: search by sample (location/recorder/grid ref/eventID), or sear
 2. Clickable rows now look clickable. Added a consistent link style (green underline-on-hover) plus a › chevron to every dynamically-loaded row — observations list, demographic groups, specimens, and taxon-search results. Demographic/specimen rows (which expand in place) rotate their chevron to indicate open/closed state; observation rows (which navigate elsewhere) keep a static chevron as an "open" cue.
 3. Observation literature Type is now a real dropdown. Added a controlled vocabulary — Identified using, Determination confirmed in, First published record in, Discussed in — validated server-side and offered as a <select> instead of free text. Happy to add more categories if you think of other reasons an observation might cite a publication.
 4. set map default to being blnk (no records shown) until a taxon is chosen.
+5. Species picker drop down menus were altered in index, taxonomy, taxonomy_editor, record_editor, literature, submit, and review html pages so that scientific name authors were shown alongside species, so that, in cases of misapplication,  it was clearer which entry was the valid species and which was misapplied.
 
 ## Record viewer for users
 New /records/view page + backend, reachable from a "View Record →" link added to the map popup. It's read-only, public (no login needed), shows sample + observation + demographics + specimens + literature at both levels, and — only for superusers — shows a gold "Switch to editing mode" button linking to /admin/records?observation_id=X. I also taught record_editor.html to accept that ?observation_id= (or ?event_id=) URL param and jump straight to the right record, same pattern as the taxonomy editor's deep links.
@@ -839,3 +840,6 @@ Edits were also made to [main.py](main.py), [review.html](review.html), [taxonom
 And a new page created:
 
 [batch_upload.html](batch_upload.html)
+
+A problem relating to a split() function being applied to integer values in the unique identifiers columns was sorted. Problems loading the review page were fixed.  A problem with the taxon reassignment for non-matched taxa from bulk uploads (wiping all data when superusers reassigned taxa) was fixed (was it?  ongoing...)
+
