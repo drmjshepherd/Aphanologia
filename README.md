@@ -825,11 +825,11 @@ Validate → Commit, two separate endpoints as planned, with the commit endpoint
 The Review Queue's observation list used an inner join to taxonomy, meaning any placeholder observation (no taxon yet) would have silently vanished from the queue entirely rather than showing up for review. This was fixed to a left join, since this is exactly the scenario batch upload now creates routinely.
 Assigning a taxon to a placeholder observation (via the Record Editor or the new Review Queue picker) now correctly clears proposed_taxon_name once resolved, so it doesn't linger in the unresolved-taxa list after being handled.
 
-Review Queue got a new "Unresolved taxa" section — lists every observation with an unmatched name regardless of verification status (important since superuser batch uploads are auto-verified but can still have genuinely unresolved taxa), with inline "assign existing taxon" search and a "create as new taxon" link that pre-fills the Taxonomy Editor's add-new form via the same ?new_taxon_name= pattern already used elsewhere for deep links.
+Review Queue got a new "Unresolved taxa" section — lists every observation with an unmatched name regardless of verification status (important since superuser batch uploads are auto-verified but can still have genuinely unresolved taxa), with inline "assign existing taxon" search and a "create as new taxon" link that pre-fills the Taxonomy Editor's add-new form via the same ?new_taxon_name= pattern already used elsewhere for deep links.  A small initial issue, which resulted in reassigend taxon observations losing their original data on update, was resolved and issues in the data corrected.
 
 One scope note, consistent with keeping this simple: the Samples sheet captures sourceCategory as free text/dropdown rather than a structured literature/project ID link (picking a specific existing literature reference by ID in a spreadsheet cell isn't practical) — if a batch-uploaded sample needs a proper linked reference, that's a quick follow-up in the Record Editor's already-built sample literature/project panel.
 
-A further set of edits was required to pre-populate donwloaded tables with literature links or information on the project, recording event, museum collection/institutional collection, personal collection or other event where the uploaded records would come from.  This removes the need to individually update each sample with this information after upload.
+A further set of edits was required to pre-populate donwloaded tables with literature links or information on the project, recording event, museum collection/institutional collection, personal collection or other event where the uploaded records would come from.  This removes the need to individually update each sample with this information after upload and locks each upload to a literature source or project
 
 The addition of a placeholder name for taxon names not present in the database was included using:
 
@@ -843,3 +843,20 @@ And a new page created:
 
 A problem relating to a split() function being applied to integer values in the unique identifiers columns was sorted. Problems loading the review page were fixed.  A problem with the taxon reassignment for non-matched taxa from bulk uploads (wiping all data when superusers reassigned taxa) was fixed (was it?  ongoing...)
 
+## Sample submit/edit form harmonisation and update
+
+Submit and record_editor forms didn't consistently use dropdowns and had different available fields to submit or edit.  To harmonise this, the following updates were applied.  Dropdowns, when replacing free text fields only enforce validation on entry or edit, but will tolerate existing values if retrieved.  The SHADe picker was turned into a widget accessible from both submit and edit records for samples.
+
+Sampling protocol was converted into a dropdown on both, allowing values of "Baermann extraction", "Beat sampling", "Bottle trap", "Casual collection", "Collected from host", "Direct observation", "Dispersal and manual selection", "Flotation", "Ground water sampling", "Kick sampling", "Malaise trap", "Other", "Pond net", "Pan trap", "Pitfall trap", "Scrapings/Washings", "Sediment flushing", "Sieve and pooter", "Subterranean pitfall trap", "Surface brushing", "Sweep netting", "Tow netting",  "Tullgren funnel", "Vacuum sampling", "Whitehead Tray", "Winkler bag". This field is nullable.
+
+Date picker dropdowns were applied to both Earliest Date/Latest Date in both submit and edit forms (ensuring that both remained capable of receiving dates pre 1900).
+
+"Recorded by": In the submit form:"Your name" in the box changed to "Name of recorder/collector".
+
+Habitat:  This already had a dropdown in the submit but not in record_editor,  Please can we include a dropdown in record_editor.  Expand habitat options in both to include all current options but also add the following marine habitats (loosely based on JNCC biotopes, but simplified for recording scheme):  Littoral Rock and Hard Surfaces; Littoral Sediment; Littoral Mobile Stones; Open Water (Coastal); Open Water (Offshore); Sublittoral Sunlit Rocks, Reefs and Structures; Kelp forests; Sublittoral Sunlit Sediments; Sublittoral Sunlit Mobile Stones; Seagrass beds; Deeper Rocks, Reefs and Structures; Deeper Marine Sediments.  I've missed "deeper mobile stones" as i'm not sure these really exist in any create quantity.
+
+SHADe:  to add the SHADe picker box to the editor, as well as the record submission, it was created into a javascript widget, similar to that used to add new literature.
+
+Other changes requested were :Sample size value: Add to submit form - accept only numbers; Sample size unit: Add to submit form - only pop up if sample size value is entered, then make it required for submission.  We're looking for everything from vague "sample", "handful" to precise "g", "cm3" here; Data restricted: Add to submit form - as a tick box resulting in a "Y" or "N" value added to the samples table column; Licence holder: Add to submit form - only pop up if data restricted = Y, then make it required for submission; Data source: This is a remaining free text form, and needs to point out that it's not a substitute for adding a real literature link. Change name to "Data source notes" and include in submit; Event remarks/General remarks:  harmonise under General remarks in both forms; Submit also needs a "Cancel" button next to the submit button that just takes you back to the landing page, after a check "Are you sure you want to cancel?  All data entered will be lost." window.
+
+This involved updates to main.py, submit.html, record_editor.html and generated 2 javascript elements shade_widget.js and 
