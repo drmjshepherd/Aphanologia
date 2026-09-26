@@ -89,6 +89,7 @@
                     <input type="text" id="taxonSearch" placeholder="e.g. Veigaia or Oribatida" autocomplete="off">
                     <div id="taxon-search-dropdown"></div>
                 </div>
+                <div id="synonymNotice"></div>
             </div>
             <div class="control-group">
                 <label>Date Range (Years)</label>
@@ -144,14 +145,15 @@
         // re-applied - the moment the user edits the search box by hand,
         // we clear this and switch to using their typed text instead.
         let overrideTaxonId = getUrlParameter('taxon_id');
-
-        if (overrideTaxonId) {
-            fetch("/api/v1/taxonomy/detail/" + encodeURIComponent(overrideTaxonId))
-                .then(function(response) { return response.json(); })
-                .then(function(json) {
-                    document.getElementById("taxonSearch").value = json.scientificName;
-                });
-        }
+		let overrideTaxonStatus = null;
+		if (overrideTaxonId) {
+			fetch("/api/v1/taxonomy/detail/" + encodeURIComponent(overrideTaxonId))
+				.then(function(response) { return response.json(); })
+				.then(function(json) {
+					document.getElementById("taxonSearch").value = json.scientificName;
+					overrideTaxonStatus = json.taxonomicStatus;
+				});
+		}
 
         // If the user types in the search box themselves, that should
         // take priority from then on - stop using the URL's taxon_id
@@ -163,6 +165,7 @@
 
         taxonSearchBox.addEventListener('input', function() {
             overrideTaxonId = null;
+			overrideTaxonStatus = null;
             clearTimeout(taxonSearchTimer);
             const query = taxonSearchBox.value.trim();
             if (query.length < 3) {
@@ -187,6 +190,7 @@
                             row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="authorship-tag">${t.authorship || ''}</span><span class="rank-tag">${t.taxon_rank}</span>`;
                             row.addEventListener('click', () => {
                                 overrideTaxonId = t.taxon_id;
+                                overrideTaxonStatus = t.taxonomic_status;
                                 taxonSearchBox.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
                                 taxonSearchDropdown.classList.remove('visible');
                                 loadMapData();
@@ -207,68 +211,150 @@
             }
         });
 
-        function loadMapData() {
-            const hint = document.getElementById('mapHint');
-            if (hint) hint.remove();
+		async function loadMapData() {
+			const hint = document.getElementById('mapHint');
+			if (hint) hint.remove();
 
-            const taxon = document.getElementById('taxonSearch').value;
-            const startYear = document.getElementById('startYear').value;
-            const endYear = document.getElementById('endYear').value;
-            const radius = parseInt(document.getElementById('markerRadius').value);
-            const displayMode = document.getElementById('displayMode').value;
+			const typedTaxon = document.getElementById('taxonSearch').value.trim();
+			const startYear = document.getElementById('startYear').value;
+			const endYear = document.getElementById('endYear').value;
+			const radius = parseInt(document.getElementById('markerRadius').value);
+			const displayMode = document.getElementById('displayMode').value;
 
-            let url = `/api/v1/observations/geojson?limit=50000`;
-            if (overrideTaxonId) {
-                url += `&taxon_id=${encodeURIComponent(overrideTaxonId)}`;
-            } else if (taxon) {
-                url += `&taxon_name=${encodeURIComponent(taxon)}`;
-            }
-            if (startYear) url += `&start_year=${startYear}`;
-            if (endYear) url += `&end_year=${endYear}`;
+			let taxonId = overrideTaxonId;
+			let taxonStatus = overrideTaxonStatus;
 
-            if (geoJsonLayer) map.removeLayer(geoJsonLayer);
-            clusterGroup.clearLayers();
-            map.removeLayer(clusterGroup);
+			// If the user typed a name without picking a dropdown suggestion,
+			// try to resolve it to a specific taxon first - this lets typing
+			// a synonym's exact name (not just clicking it in the dropdown)
+			// trigger the same accepted-name resolution below.
+			if (!taxonId && typedTaxon) {
+				try {
+					const searchRes = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(typedTaxon)}&limit=5`);
+					const searchData = await searchRes.json();
+					const exactMatch = searchData.results.find(
+						r => r.scientific_name.toLowerCase() === typedTaxon.toLowerCase()
+					);
+					if (exactMatch) {
+						taxonId = exactMatch.taxon_id;
+						taxonStatus = exactMatch.taxonomic_status;
+					}
+				} catch (err) {
+					// No match found or search failed - fall through to the
+					// legacy free-text name search further down.
+				}
+			}
 
-            fetch(url)
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('recordCount').textContent = data.count.toLocaleString();
-                    geoJsonLayer = L.geoJSON(data, {
-                        pointToLayer: function (feature, latlng) {
-                            return L.circleMarker(latlng, {
-                                radius: radius,
-                                fillColor: "#2d6a4f",
-                                color: "#081c15",
-                                weight: 1,
-                                opacity: 0.9,
-                                fillOpacity: 0.7
-                            });
-                        },
-                        onEachFeature: function (feature, layer) {
-                            const props = feature.properties;
-                            const popupContent = `
-                                <div class="popup-title">${props.scientificName}</div>
-                                <b>Rank:</b> ${props.taxonRank}<br>
-                                <b>Grid Ref:</b> ${props.gridRef || 'N/A'}<br>
-                                <b>Date:</b> ${props.earliestDate || 'N/A'}<br>
-                                <b>Location:</b> ${props.samplingLocation || 'Unspecified'}<br>
-                                <small>Observation ID: ${props.observationID}</small><br>
-                                <a href="/records/view?observation_id=${encodeURIComponent(props.observationID)}" target="_blank" rel="noopener" style="display:inline-block; margin-top:6px; font-size:0.85em;">View Record &rarr;</a>
-                            `;
-                            layer.bindPopup(popupContent);
-                        }
-                    });
-                    if (displayMode === 'cluster') {
-                        clusterGroup.addLayer(geoJsonLayer);
-                        map.addLayer(clusterGroup);
-                    } else {
-                        map.addLayer(geoJsonLayer);
-                    }
-                })
-                .catch(error => console.error('Error fetching map data:', error));
-        }
+			let queryTaxonId = taxonId;
+			let synonymNotice = null;
 
+			if (taxonId && taxonStatus && taxonStatus !== 'accepted' && taxonStatus !== 'doubtful') {
+				try {
+					const detailRes = await fetch(`/api/v1/taxonomy/detail/${encodeURIComponent(taxonId)}`);
+					const detail = await detailRes.json();
+					if (detail.acceptedNameUsageID) {
+						queryTaxonId = detail.acceptedNameUsageID;
+						synonymNotice = {
+							enteredId: taxonId,
+							enteredName: typedTaxon || taxonId,
+							acceptedName: detail.accepted_scientific_name,
+							acceptedTaxonId: detail.acceptedNameUsageID
+						};
+					}
+				} catch (err) {
+					// Couldn't resolve - fall back to querying the synonym's
+					// own id directly, same as today's (broken) behaviour.
+				}
+			}
+
+			let url = `/api/v1/observations/geojson?limit=50000`;
+			if (queryTaxonId) {
+				url += `&taxon_id=${encodeURIComponent(queryTaxonId)}`;
+			} else if (typedTaxon) {
+				url += `&taxon_name=${encodeURIComponent(typedTaxon)}`;
+			}
+			if (startYear) url += `&start_year=${startYear}`;
+			if (endYear) url += `&end_year=${endYear}`;
+
+			renderMapFromUrl(url, radius, displayMode);
+			renderSynonymNotice(synonymNotice, startYear, endYear, radius, displayMode);
+		}
+
+		function renderMapFromUrl(url, radius, displayMode) {
+			if (geoJsonLayer) map.removeLayer(geoJsonLayer);
+			clusterGroup.clearLayers();
+			map.removeLayer(clusterGroup);
+
+			fetch(url)
+				.then(response => response.json())
+				.then(data => {
+					document.getElementById('recordCount').textContent = data.count.toLocaleString();
+					geoJsonLayer = L.geoJSON(data, {
+						pointToLayer: function (feature, latlng) {
+							return L.circleMarker(latlng, {
+								radius: radius,
+								fillColor: "#2d6a4f",
+								color: "#081c15",
+								weight: 1,
+								opacity: 0.9,
+								fillOpacity: 0.7
+							});
+						},
+						onEachFeature: function (feature, layer) {
+							const props = feature.properties;
+							const popupContent = `
+								<div class="popup-title">${props.scientificName}</div>
+								<b>Rank:</b> ${props.taxonRank}<br>
+								<b>Grid Ref:</b> ${props.gridRef || 'N/A'}<br>
+								<b>Date:</b> ${props.earliestDate || 'N/A'}<br>
+								<b>Location:</b> ${props.samplingLocation || 'Unspecified'}<br>
+								<small>Observation ID: ${props.observationID}</small><br>
+								<a href="/records/view?observation_id=${encodeURIComponent(props.observationID)}" target="_blank" rel="noopener" style="display:inline-block; margin-top:6px; font-size:0.85em;">View Record &rarr;</a>
+							`;
+							layer.bindPopup(popupContent);
+						}
+					});
+					if (displayMode === 'cluster') {
+						clusterGroup.addLayer(geoJsonLayer);
+						map.addLayer(clusterGroup);
+					} else {
+						map.addLayer(geoJsonLayer);
+					}
+				})
+				.catch(error => console.error('Error fetching map data:', error));
+		}
+
+		function renderSynonymNotice(notice, startYear, endYear, radius, displayMode) {
+			const container = document.getElementById('synonymNotice');
+			if (!notice) {
+				container.innerHTML = '';
+				return;
+			}
+			container.innerHTML = `
+				<p class="synonym-hint">Showing all records for accepted taxon name: <b>${notice.acceptedName}</b></p>
+				<a href="#" id="narrowToSynonymLink">Search only for ${notice.enteredName} (synonym) records</a>
+			`;
+			document.getElementById('narrowToSynonymLink').addEventListener('click', (e) => {
+				e.preventDefault();
+				let narrowUrl = `/api/v1/observations/geojson?limit=50000&exact_taxon_id=${encodeURIComponent(notice.enteredId)}`;
+				if (startYear) narrowUrl += `&start_year=${startYear}`;
+				if (endYear) narrowUrl += `&end_year=${endYear}`;
+				renderMapFromUrl(narrowUrl, radius, displayMode);
+
+				container.innerHTML = `
+					<p class="synonym-hint">Showing only records entered under: <b>${notice.enteredName}</b> (synonym)</p>
+					<a href="#" id="backToAcceptedLink">Show all records for ${notice.acceptedName} (accepted name)</a>
+				`;
+				document.getElementById('backToAcceptedLink').addEventListener('click', (e2) => {
+					e2.preventDefault();
+					let acceptedUrl = `/api/v1/observations/geojson?limit=50000&taxon_id=${encodeURIComponent(notice.acceptedTaxonId)}`;
+					if (startYear) acceptedUrl += `&start_year=${startYear}`;
+					if (endYear) acceptedUrl += `&end_year=${endYear}`;
+					renderMapFromUrl(acceptedUrl, radius, displayMode);
+					renderSynonymNotice(notice, startYear, endYear, radius, displayMode);
+				});
+			});
+		}
         // Loading every observation by default doesn't scale as the
         // database grows, so the map now starts blank until filters
         // are applied - unless arriving via a link that already names
