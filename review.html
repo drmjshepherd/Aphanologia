@@ -418,10 +418,49 @@
                 statusEl.className = 'review-status';
                 statusEl.textContent = 'Assigning...';
                 try {
+                    // The observation-edit endpoint is a full-replace
+                    // PUT, same convention as every other edit form in
+                    // the app - sending just {taxonID} would silently
+                    // reset every other field (catalogNumber,
+                    // occurrenceRemarks, etc.) back to blank. So the
+                    // current record is fetched first and every field
+                    // is carried forward unchanged except taxonID and
+                    // identificationRemarks, which gets a note recording
+                    // exactly what name was originally uploaded, for
+                    // anyone reading this record later without the
+                    // context of the batch upload it came from.
+                    const getRes = await fetch(`/api/v1/admin/observations/${encodeURIComponent(obs.observationID)}`);
+                    const current = await getRes.json();
+                    if (!getRes.ok) throw new Error(current.detail || 'Could not load current observation data');
+                    const o = current.observation;
+
+                    const originalNameNote = `Original name uploaded: ${obs.proposed_taxon_name}`;
+                    const existingRemarks = (o.identificationRemarks || '').trim();
+                    const newRemarks = existingRemarks
+                        ? `${existingRemarks}\n${originalNameNote}`
+                        : originalNameNote;
+
                     const res = await fetch(`/api/v1/admin/observations/${encodeURIComponent(obs.observationID)}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ taxonID: chosenTaxonId })
+                        body: JSON.stringify({
+                            eventID: o.eventID,
+                            taxonID: chosenTaxonId,
+                            identifiedBy: o.identifiedBy,
+                            identificationVerificationStatus: o.identificationVerificationStatus,
+                            identificationRemarks: newRemarks,
+                            collectionID: o.collectionID,
+                            catalogNumber: o.catalogNumber,
+                            basisOfRecord: o.basisOfRecord,
+                            idTechnique: o.idTechnique,
+                            litID: o.litID,
+                            idText: o['idText[free_text]'],
+                            occurrenceRemarks: o.occurrenceRemarks,
+                            share_with_nbn: o.share_with_nbn,
+                            share_with_gbif: o.share_with_gbif,
+                            coordinate_uncertainty_meters: o.coordinate_uncertainty_meters,
+                            notes: 'Taxon resolved from batch-upload placeholder via Review Queue'
+                        })
                     });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.detail || 'Could not assign taxon');
