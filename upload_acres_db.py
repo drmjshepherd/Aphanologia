@@ -11,7 +11,7 @@ DB_HOST = "localhost"
 DB_PORT = "5432"
 DB_NAME = "Aphanologia"
 
-EXCEL_FILE_PATH = r"C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx"
+EXCEL_FILE_PATH = r"C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx" # <--- Update with the path to your local data for upload.
 
 # Mapping database tables to Excel sheet names
 SHEETS_TO_TABLES = {
