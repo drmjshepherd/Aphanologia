@@ -67,39 +67,6 @@
         .gate-message { text-align: center; padding: 60px 20px; color: #495057; }
         .gate-message a { color: #2d6a4f; font-weight: bold; }
 
-        /* --- SHADe builder --- */
-        #shade-builder {
-            border: 1px dashed #b7d9c4;
-            border-radius: 6px;
-            padding: 16px;
-            background: #f4faf6;
-        }
-        #shade-builder .shade-step { margin-bottom: 14px; }
-        #shade-builder .shade-step:last-child { margin-bottom: 0; }
-        #shade-builder .shade-step-label { font-weight: 600; font-size: 0.82rem; color: #2d6a4f; margin-bottom: 4px; display: block; }
-        #shade-preview {
-            font-family: 'Consolas', monospace;
-            font-size: 1.1rem;
-            font-weight: bold;
-            color: #1b4332;
-            background: white;
-            border: 1px solid #b7d9c4;
-            border-radius: 4px;
-            padding: 8px 12px;
-            margin-top: 10px;
-            letter-spacing: 0.5px;
-        }
-        #shade-preview .placeholder-part { color: #ced4da; }
-        .shade-help-btn {
-            background: none; border: none; color: #2d6a4f; text-decoration: underline;
-            font-size: 0.78rem; font-weight: normal; padding: 0; cursor: pointer;
-        }
-        .acidity-lookup-results {
-            font-size: 0.8rem; color: #495057; margin-top: 4px; max-height: 100px; overflow-y: auto;
-        }
-        .acidity-lookup-results .match-row { padding: 3px 0; cursor: pointer; }
-        .acidity-lookup-results .match-row:hover { color: #2d6a4f; font-weight: 600; }
-
         /* --- Taxon search (observation form) --- */
         .taxon-search-wrapper { position: relative; }
         #obs-taxon-dropdown {
@@ -305,7 +272,7 @@
                         </div>
                         <div class="field">
                             <label for="f-protocol">Sampling protocol</label>
-                            <input type="text" id="f-protocol" placeholder="e.g. Tullgren funnel, sieve and pooter">
+                            <select id="f-protocol"></select>
                         </div>
                     </div>
                     <div class="field-row">
@@ -314,69 +281,47 @@
                             <input type="text" id="f-microhabitat" placeholder="e.g. Under bark of fallen oak log">
                         </div>
                     </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="f-samplesize-value">Sample size <span class="hint">(optional)</span></label>
+                            <input type="number" step="any" id="f-samplesize-value" placeholder="e.g. 1">
+                        </div>
+                        <div class="field" id="f-samplesize-unit-field" style="display:none;">
+                            <label for="f-samplesize-unit">Unit *</label>
+                            <input type="text" id="f-samplesize-unit" placeholder="e.g. handful, sample, g, cm3">
+                        </div>
+                    </div>
 
                     <!-- SHADe builder -->
                     <div class="field-row">
                         <div class="field full">
-                            <label>
-                                Microhabitat code (SHADe)
-                                <button type="button" class="shade-help-btn" onclick="toggleShadeExplainer()">what's this?</button>
-                            </label>
-                            <div id="shade-explainer" style="display:none; font-size: 0.8rem; color: #495057; background: #fff8e6; border: 1px solid #f0dca0; border-radius: 4px; padding: 10px; margin-bottom: 8px;">
-                                SHADe records the exact physical situation the specimen was found in &mdash;
-                                its <b>S</b>ubstrate, <b>H</b>umidity, <b>A</b>cidity, and <b>D</b>isturbance history &mdash;
-                                as a short code like <code>TsSc-5-6-5</code>. This is genuinely useful research data:
-                                it's what lets someone later explore which microhabitats a species actually favours,
-                                across every record in the database. Use the tool below to build it step by step
-                                &mdash; you don't need to memorise the codes.
-                            </div>
-                            <div id="shade-builder">
-                                <div class="shade-step">
-                                    <span class="shade-step-label">Substrate 1 (required)</span>
-                                    <div class="field-row" style="margin-bottom: 0;">
-                                        <div class="field"><select id="shade-sub1-major"></select></div>
-                                        <div class="field"><select id="shade-sub1-minor"></select></div>
-                                    </div>
-                                </div>
-                                <div class="shade-step">
-                                    <label style="font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
-                                        <input type="checkbox" id="shade-sub2-toggle">
-                                        This was an interface between two substrates &mdash; add a second one
-                                    </label>
-                                    <div class="field-row" id="shade-sub2-row" style="margin-top: 6px; margin-bottom: 0; display: none;">
-                                        <div class="field"><select id="shade-sub2-major"></select></div>
-                                        <div class="field"><select id="shade-sub2-minor"></select></div>
-                                    </div>
-                                </div>
-                                <div class="shade-step">
-                                    <span class="shade-step-label">Humidity regime</span>
-                                    <select id="shade-humidity"></select>
-                                </div>
-                                <div class="shade-step">
-                                    <span class="shade-step-label">Acidity / alkalinity (pH)</span>
-                                    <div class="field-row" style="margin-bottom: 0;">
-                                        <div class="field">
-                                            <input type="text" id="shade-acidity-lookup" placeholder="Type a plant name to estimate pH...">
-                                            <div class="acidity-lookup-results" id="shade-acidity-results"></div>
-                                        </div>
-                                        <div class="field" style="max-width: 160px;">
-                                            <select id="shade-acidity"></select>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="shade-step">
-                                    <span class="shade-step-label">Disturbance history</span>
-                                    <select id="shade-disturbance"></select>
-                                </div>
-                                <div id="shade-preview">TsSc-5-6-5</div>
-                            </div>
+                            <label for="f-shade">Microhabitat code (SHADe)</label>
+                            <div id="shade-widget-container"></div>
                         </div>
                     </div>
 
                     <div class="field-row">
                         <div class="field">
                             <label for="f-recordedby">Recorded by</label>
-                            <input type="text" id="f-recordedby" placeholder="Your name">
+                            <input type="text" id="f-recordedby" placeholder="Name of recorder/collector">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full" style="flex-direction:row; align-items:center; gap:8px;">
+                            <input type="checkbox" id="f-datarestricted" style="width:auto;">
+                            <label for="f-datarestricted" style="margin:0; font-weight:normal;">Data restricted <span class="hint">(e.g. sensitive location for a protected species)</span></label>
+                        </div>
+                    </div>
+                    <div class="field-row" id="f-licenceholder-field" style="display:none;">
+                        <div class="field full">
+                            <label for="f-licenceholder">Licence holder *</label>
+                            <input type="text" id="f-licenceholder" placeholder="Who holds the licence covering this record?">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="f-datasource-notes">Data source notes <span class="hint">(optional - not a substitute for linking a real literature reference or project above)</span></label>
+                            <input type="text" id="f-datasource-notes" placeholder="Any extra context on where this record came from">
                         </div>
                     </div>
                     <div class="field-row">
@@ -386,7 +331,10 @@
                         </div>
                     </div>
 
-                    <button type="submit">Create sample</button>
+                    <div class="save-row" style="display:flex; gap:10px; align-items:center;">
+                        <button type="submit">Create sample</button>
+                        <button type="button" class="secondary" onclick="cancelSampleForm()">Cancel</button>
+                    </div>
                     <div id="sample-status"></div>
                 </form>
             </div>
@@ -482,6 +430,8 @@
     </div>
 
     <script src="/static/js/literature_widget.js"></script>
+    <script src="/static/js/shade_widget.js"></script>
+    <script src="/static/js/sample_dropdown_options.js"></script>
     <script>
         // ==================================================
         // AUTH GATE
@@ -521,204 +471,12 @@
         checkAuth();
 
         // ==================================================
-        // SHADe BUILDER
+        // SHADe BUILDER (shared widget)
         // ==================================================
-        const SHADE_SUBSTRATES = {
-            S: { label: "Soil - mineral soil or sediment", subs: { s: "Sandy", c: "Clayey", z: "Silty", l: "Loamy", o: "Organic", b: "Subsoil" } },
-            O: { label: "Organic matter (excl. living/woody/dung)", subs: { f: "Fresh cut plant material (e.g. grass clippings)", d: "Decomposing plant material", h: "Humified plant material (no recognisable remains)", b: "Broadleaved leaf litter", c: "Conifer (needle) litter", n: "Nest material of animals", s: "Dried stored food products", p: "Peat" } },
-            I: { label: "Inert man-made material", subs: { p: "Plastic / rubber", m: "Metal", o: "Other" } },
-            L: { label: "Lichen", subs: { c: "Crustose lichen", n: "Non-crustose lichen" } },
-            P: { label: "Plant (non-woody, living)", subs: { l: "Leaves of living plants", r: "Roots of plant", f: "Flowers or fruit", s: "Stems or axils" } },
-            F: { label: "Fungi (non-lichenised)", subs: { f: "Fruiting bodies", m: "Fungal mycelium" } },
-            E: { label: "Exposed to air", subs: { a: "Aerial / Aeolian sample", s: "Surface of other substrate" } },
-            C: { label: "Carrion (dead animal material)", subs: { i: "Dead invertebrate", v: "Dead vertebrate (flesh)", f: "Animal fur, feathers, scales etc." } },
-            T: { label: "Timber (all woody material)", subs: { l: "Living woody tissue", u: "Unaltered dead wood (e.g. heartwood)", s: "Soft rot (brown rot) wood", w: "White rot wood", f: "Comminuted wood / invertebrate dung (frass)", b: "Bark (incl. living trees)", t: "Treated wood", c: "Charred wood / charcoal", a: "Ash" } },
-            D: { label: "Dung", subs: { c: "Carnivore dung", h: "Herbivore dung", o: "Omnivore dung", i: "Insectivore dung", m: "Manure" } },
-            A: { label: "Animals (living)", subs: { a: "Arthropods", i: "Other invertebrates (e.g. molluscs)", v: "Vertebrates" } },
-            B: { label: "Bryophytes / lower plants", subs: { m: "Mosses", l: "Liverworts", a: "Algae (excl. marine)", s: "Marine algae (seaweed)" } },
-            R: { label: "Rock", subs: { b: "Boulders / bedrock", c: "Cobbles", g: "Gravel", a: "Artificial rock-like material (concrete/brick/tile)" } },
-            W: { label: "Water", subs: { r: "Running freshwater", s: "Still freshwater", b: "Brackish", m: "Marine" } },
-        };
-
-        const SHADE_HUMIDITY = [
-            [1, "1 - Perpetually dry (only moisture from surrounding air)"],
-            [2, "2 - Wetted occasionally, dries fully within a day"],
-            [3, "3 - Occasionally wetted, dries fully within a dry week"],
-            [4, "4 - Stays moist except in unusual drought"],
-            [5, "5 - Stays moist in all conditions, including drought"],
-            [6, "6 - Occasionally waterlogged"],
-            [7, "7 - Continuously waterlogged"],
-            [0, "0 - Unknown / not estimated"],
-        ];
-
-        const SHADE_DISTURBANCE = [
-            [1, "1 - Up to 1 day ago, or constantly disturbed"],
-            [2, "2 - 1 day to 1 week ago"],
-            [3, "3 - 1 week to 1 month ago"],
-            [4, "4 - 1 month to 1 year ago"],
-            [5, "5 - 1 year to 1 decade ago"],
-            [6, "6 - 1 decade to 1 century ago"],
-            [7, "7 - A century or more ago (effectively undisturbed)"],
-            [0, "0 - Unknown / not estimated"],
-        ];
-
-        // Plant pH indicators, from the SHADe reference sheet. Used for
-        // the type-ahead lookup next to the Acidity dropdown - this is a
-        // helper only, the dropdown value is always what actually gets saved.
-        const SHADE_PLANT_PH = [
-            [4, "Cotton grasses (Eriophorum vaginatum / angustifolium)"], [4, "Crowberry"], [4, "Scots pine"],
-            [4, "Sphagnum"], [4, "Cladonia"], [4, "Sickle moss"], [4, "Cross-leaved heath"], [4, "Deer-grass"],
-            [4, "Bilberry"], [4, "Ling (heather)"], [4, "Hypnum cupressiforme"], [4, "Wavy hair-grass"],
-            [5, "Mat-grass"], [5, "Heath bedstraw"], [5, "Star sedge"], [5, "Tormentil"],
-            [5, "Heath/meadow wood-rush"], [5, "Barbed-wire moss"], [5, "Velvet bent"], [5, "Bracken"],
-            [5, "Foxglove"], [5, "Common star-moss"], [5, "Bluebell"],
-            [6, "Meadow foxtail grass"], [6, "Cuckoo-flower"], [6, "Common sorrel"], [6, "Common cat's-ear"],
-            [6, "Thyme-leaved speedwell"], [6, "Common mouse-ear"], [6, "Meadow buttercup"],
-            [6, "Creeping buttercup"], [6, "Marsh bedstraw"], [6, "Lesser stitchwort"],
-            [6, "Wavy/hairy bitter-cress"], [6, "Sticky mouse-ear"],
-            [7, "Broad-leaved dock"], [7, "Dandelion"], [7, "Curled dock"], [7, "Timothy grass"],
-            [7, "Yellow trefoil"], [7, "Common vetch"], [7, "Yellow vetchling"], [7, "Red clover"],
-            [7, "Common knapweed"], [7, "Common fleabane"], [7, "Barley"], [7, "Lop-grass"],
-            [7, "Black bent"], [7, "Creeping cinquefoil"], [7, "Tall fescue"], [7, "Oat"], [7, "Maize"],
-            [7, "Couch grass"], [7, "Cut-leaved cranesbill"], [7, "Hoary willow-herb"], [7, "Cabbage"],
-            [8, "Fat hen"], [8, "Swine-cress"], [8, "Dove's-foot cranesbill"], [8, "Scentless mayweed"],
-            [8, "Wheat"], [8, "Scented mayweed"], [8, "Field bindweed"], [8, "Field madder"],
-            [8, "Field pansy"], [8, "Prickly ox-tongue"], [8, "Common field speedwell"], [8, "Hedge mustard"],
-            [8, "Charlock"], [8, "Bryum"], [8, "Black-grass"], [8, "Potato"], [8, "Black bindweed"],
-            [8, "Common poppy"], [8, "Common orache"], [8, "Fool's parsley"], [8, "Sea beet"],
-        ];
-
-        function populateSubstrateMajor(selectEl) {
-            selectEl.innerHTML = '<option value="">-- Major substrate --</option>';
-            for (const [code, group] of Object.entries(SHADE_SUBSTRATES)) {
-                selectEl.innerHTML += `<option value="${code}">${code} - ${group.label}</option>`;
-            }
-            selectEl.innerHTML += `<option value="X">X - Unknown</option>`;
-        }
-
-        function populateSubstrateMinor(majorSelectEl, minorSelectEl) {
-            const major = majorSelectEl.value;
-            minorSelectEl.innerHTML = '<option value="">-- Subtype --</option>';
-            if (major === 'X' || !major) {
-                minorSelectEl.innerHTML += `<option value="x">x - Unknown</option>`;
-                minorSelectEl.value = 'x';
-                return;
-            }
-            const group = SHADE_SUBSTRATES[major];
-            if (!group) return;
-            for (const [subCode, subLabel] of Object.entries(group.subs)) {
-                minorSelectEl.innerHTML += `<option value="${subCode}">${subLabel}</option>`;
-            }
-        }
-
-        function populateNumberSelect(selectEl, options) {
-            selectEl.innerHTML = '<option value="">-- Select --</option>';
-            for (const [value, label] of options) {
-                selectEl.innerHTML += `<option value="${value}">${label}</option>`;
-            }
-        }
-
-        function initShadeBuilder() {
-            const sub1Major = document.getElementById('shade-sub1-major');
-            const sub1Minor = document.getElementById('shade-sub1-minor');
-            const sub2Major = document.getElementById('shade-sub2-major');
-            const sub2Minor = document.getElementById('shade-sub2-minor');
-            const sub2Toggle = document.getElementById('shade-sub2-toggle');
-            const sub2Row = document.getElementById('shade-sub2-row');
-            const humidity = document.getElementById('shade-humidity');
-            const acidity = document.getElementById('shade-acidity');
-            const disturbance = document.getElementById('shade-disturbance');
-            const acidityLookup = document.getElementById('shade-acidity-lookup');
-            const acidityResults = document.getElementById('shade-acidity-results');
-
-            populateSubstrateMajor(sub1Major);
-            populateSubstrateMajor(sub2Major);
-            populateSubstrateMinor(sub1Major, sub1Minor);
-            populateSubstrateMinor(sub2Major, sub2Minor);
-            populateNumberSelect(humidity, SHADE_HUMIDITY);
-            populateNumberSelect(disturbance, SHADE_DISTURBANCE);
-
-            acidity.innerHTML = '<option value="">-- Select --</option><option value="0">0 - Unknown</option>';
-            for (let ph = 3; ph <= 9; ph++) {
-                acidity.innerHTML += `<option value="${ph}">pH ${ph}</option>`;
-            }
-
-            [sub1Major, sub1Minor, sub2Major, sub2Minor, humidity, acidity, disturbance].forEach(el => {
-                el.addEventListener('change', updateShadePreview);
-            });
-            sub1Major.addEventListener('change', () => { populateSubstrateMinor(sub1Major, sub1Minor); updateShadePreview(); });
-            sub2Major.addEventListener('change', () => { populateSubstrateMinor(sub2Major, sub2Minor); updateShadePreview(); });
-
-            sub2Toggle.addEventListener('change', () => {
-                sub2Row.style.display = sub2Toggle.checked ? 'flex' : 'none';
-                if (!sub2Toggle.checked) {
-                    sub2Major.value = '';
-                    populateSubstrateMinor(sub2Major, sub2Minor);
-                }
-                updateShadePreview();
-            });
-
-            acidityLookup.addEventListener('input', () => {
-                const q = acidityLookup.value.trim().toLowerCase();
-                acidityResults.innerHTML = '';
-                if (q.length < 2) return;
-                const matches = SHADE_PLANT_PH.filter(([ph, name]) => name.toLowerCase().includes(q)).slice(0, 8);
-                matches.forEach(([ph, name]) => {
-                    const row = document.createElement('div');
-                    row.className = 'match-row';
-                    row.textContent = `${name} -> pH ${ph}`;
-                    row.addEventListener('click', () => {
-                        acidity.value = ph;
-                        acidityLookup.value = '';
-                        acidityResults.innerHTML = '';
-                        updateShadePreview();
-                    });
-                    acidityResults.appendChild(row);
-                });
-            });
-
-            updateShadePreview();
-        }
-
-        function getShadeCode() {
-            const sub1Major = document.getElementById('shade-sub1-major').value;
-            const sub1Minor = document.getElementById('shade-sub1-minor').value;
-            const sub2Toggle = document.getElementById('shade-sub2-toggle').checked;
-            const sub2Major = document.getElementById('shade-sub2-major').value;
-            const sub2Minor = document.getElementById('shade-sub2-minor').value;
-            const humidity = document.getElementById('shade-humidity').value;
-            const acidity = document.getElementById('shade-acidity').value;
-            const disturbance = document.getElementById('shade-disturbance').value;
-
-            if (!sub1Major || !sub1Minor || humidity === '' || acidity === '' || disturbance === '') {
-                return null; // not complete yet
-            }
-
-            const part1 = sub1Major + sub1Minor;
-            let part2;
-            if (sub2Toggle) {
-                if (!sub2Major || !sub2Minor) return null;
-                part2 = sub2Major + sub2Minor;
-            } else {
-                part2 = 'Xx';
-            }
-
-            return `${part1}${part2}-${humidity}-${acidity}-${disturbance}`;
-        }
-
-        function updateShadePreview() {
-            const code = getShadeCode();
-            const preview = document.getElementById('shade-preview');
-            preview.textContent = code || 'Complete the fields above to build the code...';
-            preview.style.color = code ? '#1b4332' : '#adb5bd';
-        }
-
-        function toggleShadeExplainer() {
-            const el = document.getElementById('shade-explainer');
-            el.style.display = el.style.display === 'none' ? 'block' : 'none';
-        }
-
-        initShadeBuilder();
+        let currentShadeCode = null;
+        const shadeWidgetHandle = ShadeWidget.mount(document.getElementById('shade-widget-container'), {
+            onChange: (code) => { currentShadeCode = code; }
+        });
 
         // ==================================================
         // HABITAT DROPDOWN
@@ -733,32 +491,8 @@
             }
         }
 
-        const HABITATS = [
-            "Broadleaved and Mixed Yew Woodland",
-            "Coniferous Woodland",
-            "Boundaries and Linear Features",
-            "Arable and Horticulture",
-            "Improved Grassland",
-            "Neutral Grassland",
-            "Calcareous Grassland",
-            "Acid Grassland",
-            "Bracken",
-            "Dwarf Shrub Heath",
-            "Fen, Marsh, Swamp",
-            "Bog",
-            "Rivers and Streams",
-            "Standing Open Waters, Canals and Ponds",
-            "Montane",
-            "Inland Rock",
-            "Urban",
-            "Supra-littoral Rock",
-            "Supra-littoral Sediment",
-            "Littoral Sediment",
-            "Sea",
-            "Mosaic",
-        ];
-
-        populateSelectWithOptions(document.getElementById('f-habitat'), HABITATS, "Habitat");
+        populateSelectWithOptions(document.getElementById('f-habitat'), SampleDropdownOptions.HABITATS, "Habitat");
+        populateSelectWithOptions(document.getElementById('f-protocol'), SampleDropdownOptions.SAMPLING_PROTOCOLS, "Sampling protocol");
 
         // ==================================================
         // SOURCE OF RECORD PICKER
@@ -901,6 +635,19 @@
             const statusEl = document.getElementById('sample-status');
             statusEl.innerHTML = '';
 
+            const samplesizeValue = parseFloatOrNull(document.getElementById('f-samplesize-value').value);
+            const samplesizeUnit = document.getElementById('f-samplesize-unit').value.trim() || null;
+            if (samplesizeValue !== null && !samplesizeUnit) {
+                statusEl.innerHTML = `<div class="status-message error">Sample size unit is required whenever a sample size value is given.</div>`;
+                return;
+            }
+            const dataRestricted = document.getElementById('f-datarestricted').checked;
+            const licenceHolder = document.getElementById('f-licenceholder').value.trim() || null;
+            if (dataRestricted && !licenceHolder) {
+                statusEl.innerHTML = `<div class="status-message error">Licence holder is required when data is marked as restricted.</div>`;
+                return;
+            }
+
             const payload = {
                 samplingLocation: document.getElementById('f-location').value || null,
                 decimalLatitude: parseFloatOrNull(document.getElementById('f-lat').value),
@@ -910,10 +657,15 @@
                 latestDateCollected: document.getElementById('f-latest').value || null,
                 habitat: document.getElementById('f-habitat').value || null,
                 microhabitat: document.getElementById('f-microhabitat').value || null,
-                SHADe: getShadeCode(),
+                SHADe: currentShadeCode,
                 samplingProtocol: document.getElementById('f-protocol').value || null,
+                samplesizeValue: samplesizeValue,
+                samplesizeUnit: samplesizeUnit,
                 recordedBy: document.getElementById('f-recordedby').value || null,
                 eventRemarks: document.getElementById('f-remarks').value || null,
+                datarestricted: dataRestricted ? 'Y' : 'N',
+                licenceHolder: licenceHolder,
+                dataSource: document.getElementById('f-datasource-notes').value || null,
                 sourceCategory: document.getElementById('f-source-category').value || null,
                 sourceLiteratureID: selectedSourceLiteratureID,
                 sourceProjectID: selectedSourceProjectID,
@@ -940,6 +692,19 @@
             }
         });
 
+        document.getElementById('f-samplesize-value').addEventListener('input', (e) => {
+            document.getElementById('f-samplesize-unit-field').style.display = e.target.value.trim() ? 'block' : 'none';
+        });
+        document.getElementById('f-datarestricted').addEventListener('change', (e) => {
+            document.getElementById('f-licenceholder-field').style.display = e.target.checked ? 'flex' : 'none';
+        });
+
+        function cancelSampleForm() {
+            if (confirm('Are you sure you want to cancel? All data entered will be lost.')) {
+                window.location.href = '/';
+            }
+        }
+
         function parseFloatOrNull(v) { return v === '' ? null : parseFloat(v); }
         function parseIntOrNull(v) { return v === '' ? null : parseInt(v, 10); }
 
@@ -947,7 +712,10 @@
             activeEventId = null;
             document.getElementById('add-observation-panel').style.display = 'none';
             document.getElementById('sample-form').reset();
-            initShadeBuilder();
+            shadeWidgetHandle.reset();
+            currentShadeCode = null;
+            document.getElementById('f-samplesize-unit-field').style.display = 'none';
+            document.getElementById('f-licenceholder-field').style.display = 'none';
             resetSourcePicker();
             document.getElementById('sample-status').innerHTML = '';
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -966,6 +734,18 @@
         // Copies a previous sample's field values into the "new sample"
         // form as a starting point, since there's no true in-place editing
         // yet - this at least avoids retyping everything from scratch.
+        function ensureOptionExists(selectEl, value) {
+            if (!value) return;
+            const exists = Array.from(selectEl.options).some(o => o.value === value);
+            if (!exists) {
+                const opt = document.createElement('option');
+                opt.value = value;
+                opt.textContent = `${value} (existing value, not in the standard list)`;
+                selectEl.appendChild(opt);
+            }
+            selectEl.value = value;
+        }
+
         function useAsTemplate(sample) {
             document.getElementById('f-location').value = sample.samplingLocation || '';
             document.getElementById('f-lat').value = sample.decimalLatitude ?? '';
@@ -973,10 +753,17 @@
             document.getElementById('f-uncertainty').value = sample.coordinateUncertaintyInMeters ?? '';
             document.getElementById('f-earliest').value = sample.earliestDateCollected || '';
             document.getElementById('f-latest').value = sample.latestDateCollected || '';
-            document.getElementById('f-habitat').value = sample.habitat || '';
+            ensureOptionExists(document.getElementById('f-habitat'), sample.habitat);
             document.getElementById('f-microhabitat').value = sample.microhabitat || '';
-            document.getElementById('f-protocol').value = sample.samplingProtocol || '';
+            ensureOptionExists(document.getElementById('f-protocol'), sample.samplingProtocol);
+            document.getElementById('f-samplesize-value').value = sample.samplesizeValue ?? '';
+            document.getElementById('f-samplesize-unit').value = sample.samplesizeUnit || '';
+            document.getElementById('f-samplesize-unit-field').style.display = sample.samplesizeValue != null ? 'block' : 'none';
             document.getElementById('f-recordedby').value = sample.recordedBy || '';
+            const restricted = sample.datarestricted === 'Y';
+            document.getElementById('f-datarestricted').checked = restricted;
+            document.getElementById('f-licenceholder-field').style.display = restricted ? 'flex' : 'none';
+            document.getElementById('f-licenceholder').value = sample.licenceHolder || '';
             document.getElementById('f-remarks').value = sample.eventRemarks || '';
             // SHADe is deliberately NOT copied - it's specific to the exact
             // microhabitat of the original sample and should be re-built
