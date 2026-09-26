@@ -59,6 +59,15 @@
         .save-status { font-size: 0.85rem; }
         .save-status.error { color: #842029; }
         .save-status.success { color: #1b4332; font-weight: 600; }
+
+        .dropdown-box {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ced4da; border-top: none; max-height: 260px; overflow-y: auto;
+            z-index: 100; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .dropdown-box.visible { display: block; }
+        .taxon-result-row { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.86rem; }
+        .taxon-result-row:hover { background: #e9ecef; }
     </style>
 </head>
 <body>
@@ -81,20 +90,66 @@
             <div id="global-status"></div>
 
             <div class="panel">
-                <h2 style="font-size:1rem;"><span class="step-number">1</span>Download a template</h2>
+                <h2 style="font-size:1rem;"><span class="step-number">1</span>Choose this batch's source</h2>
+                <p class="subtext">Every sample in the file you download will be linked to this one source - required, since linking hundreds of samples individually afterwards doesn't scale. Uploading from a different source? Download a separate template for it.</p>
+
+                <div class="field-row">
+                    <div class="field">
+                        <label for="sourceType">Source type</label>
+                        <select id="sourceType">
+                            <option value="">-- choose --</option>
+                            <option value="Published literature">Published literature</option>
+                            <option value="Formal project or survey">Formal project or survey</option>
+                            <option value="Museum or institutional collection">Museum or institutional collection</option>
+                            <option value="Recording event">Recording event</option>
+                            <option value="Personal collection">Personal collection</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="source-literature-block" style="display:none;">
+                    <div class="field-row"><div class="field" style="flex:1; min-width:300px;"><label>Find the reference</label><div id="source-lit-widget"></div></div></div>
+                </div>
+
+                <div id="source-project-block" style="display:none;">
+                    <div class="field-row">
+                        <div class="field" style="flex:1; min-width:300px;">
+                            <label>Find the project</label>
+                            <div class="taxon-search-wrapper" style="position:relative;">
+                                <input type="text" id="sourceProjSearch" placeholder="Search projects..." autocomplete="off">
+                                <div id="source-proj-dropdown" class="dropdown-box"></div>
+                            </div>
+                            <div class="picker-current" id="sourceProjCurrent" style="font-size:0.85rem; padding:6px 0;"><span style="color:#adb5bd; font-style:italic;">Not set</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="source-detail-block" style="display:none;">
+                    <div class="field-row">
+                        <div class="field full">
+                            <label id="source-detail-label">Detail</label>
+                            <input type="text" id="sourceOtherDetail" placeholder="e.g. Natural History Museum, London">
+                        </div>
+                    </div>
+                </div>
+
+                <p class="subtext" id="source-resolved-note" style="display:none;"></p>
+
+                <h2 style="font-size:1rem; margin-top:20px;"><span class="step-number">2</span>Download a template</h2>
                 <div class="field-row">
                     <div class="field checkbox-field"><input type="checkbox" id="optDemographics" checked><label for="optDemographics" style="margin:0;">Include demographics sheet</label></div>
                     <div class="field checkbox-field"><input type="checkbox" id="optSpecimens" checked><label for="optSpecimens" style="margin:0;">Include specimens sheet</label></div>
                     <div class="field checkbox-field"><input type="checkbox" id="optValidTaxaOnly" checked><label for="optValidTaxaOnly" style="margin:0;">Only valid taxa <span class="hint">(in the reference sheet only)</span></label></div>
                 </div>
                 <div class="save-row">
-                    <button type="button" onclick="downloadTemplate()">Download Template</button>
+                    <button type="button" onclick="downloadTemplate()" id="downloadBtn" disabled>Download Template</button>
                 </div>
                 <p class="subtext" style="margin-top:10px; margin-bottom:0;">New samples only - this can't add to samples already in the database. A species name that doesn't match anything already catalogued is never rejected; it's queued for a superuser to review after upload.</p>
             </div>
 
             <div class="panel">
-                <h2 style="font-size:1rem;"><span class="step-number">2</span>Upload your completed file</h2>
+                <h2 style="font-size:1rem;"><span class="step-number">3</span>Upload your completed file</h2>
                 <div class="field-row">
                     <input type="file" id="fileInput" accept=".xlsx">
                 </div>
@@ -111,7 +166,7 @@
             </div>
 
             <div class="panel" id="commit-panel">
-                <h2 style="font-size:1rem;"><span class="step-number">3</span>Commit</h2>
+                <h2 style="font-size:1rem;"><span class="step-number">4</span>Commit</h2>
                 <p class="subtext">The whole file is saved together, or nothing is - fix every row above before this becomes available.</p>
                 <div class="save-row">
                     <button type="button" onclick="commitFile()" id="commitBtn" disabled>Commit Upload</button>
@@ -122,6 +177,7 @@
         </div>
     </div>
 
+    <script src="/static/js/literature_widget.js"></script>
     <script>
         let currentUser = null;
         let isContributor = false;
@@ -177,12 +233,100 @@
             document.getElementById('optSpecimens').disabled = !e.target.checked;
         });
 
+        // ---------- source selection (gates the download button) ----------
+        let sourceLitSelection = null;
+        let sourceProjSelection = null;
+        const sourceLitWidget = LiteratureWidget.mount(document.getElementById('source-lit-widget'), {
+            placeholder: 'Search by author, title, or year...',
+            onSelected: (lit) => { sourceLitSelection = lit; updateSourceResolvedState(); }
+        });
+
+        document.getElementById('sourceType').addEventListener('change', (e) => {
+            const type = e.target.value;
+            document.getElementById('source-literature-block').style.display = (type === 'Published literature') ? 'block' : 'none';
+            document.getElementById('source-project-block').style.display = (type === 'Formal project or survey') ? 'block' : 'none';
+            const needsDetail = type && type !== 'Published literature' && type !== 'Formal project or survey';
+            document.getElementById('source-detail-block').style.display = needsDetail ? 'block' : 'none';
+            if (needsDetail) {
+                document.getElementById('source-detail-label').textContent =
+                    type === 'Personal collection' ? 'Detail (optional)' :
+                    type === 'Museum or institutional collection' ? 'Which museum/institution?' :
+                    type === 'Recording event' ? 'Which event?' : 'Please specify';
+            }
+            updateSourceResolvedState();
+        });
+
+        document.getElementById('sourceOtherDetail').addEventListener('input', updateSourceResolvedState);
+
+        (function wireSourceProjectPicker() {
+            const input = document.getElementById('sourceProjSearch');
+            const dropdown = document.getElementById('source-proj-dropdown');
+            let timer = null;
+            input.addEventListener('input', () => {
+                clearTimeout(timer);
+                sourceProjSelection = null;
+                updateSourceResolvedState();
+                const q = input.value.trim();
+                if (q.length < 2) { dropdown.classList.remove('visible'); return; }
+                timer = setTimeout(async () => {
+                    const res = await fetch(`/api/v1/projects/search?q=${encodeURIComponent(q)}&limit=15`);
+                    const data = await res.json();
+                    dropdown.innerHTML = '';
+                    data.results.forEach(p => {
+                        const row = document.createElement('div');
+                        row.className = 'taxon-result-row';
+                        row.textContent = p.project_name;
+                        row.addEventListener('click', () => {
+                            sourceProjSelection = p;
+                            input.value = p.project_name;
+                            document.getElementById('sourceProjCurrent').innerHTML = `<i>${p.project_name}</i>`;
+                            dropdown.classList.remove('visible');
+                            updateSourceResolvedState();
+                        });
+                        dropdown.appendChild(row);
+                    });
+                    dropdown.classList.add('visible');
+                }, 300);
+            });
+            document.addEventListener('click', (e) => {
+                if (!input.contains(e.target) && !dropdown.contains(e.target)) dropdown.classList.remove('visible');
+            });
+        })();
+
+        function getResolvedSource() {
+            const type = document.getElementById('sourceType').value;
+            if (!type) return null;
+            if (type === 'Published literature') return sourceLitSelection ? { type, lit_id: sourceLitSelection.litID } : null;
+            if (type === 'Formal project or survey') return sourceProjSelection ? { type, project_id: sourceProjSelection.project_id } : null;
+            if (type === 'Personal collection') return { type, detail: document.getElementById('sourceOtherDetail').value || null };
+            const detail = document.getElementById('sourceOtherDetail').value.trim();
+            return detail ? { type, detail } : null;
+        }
+
+        function updateSourceResolvedState() {
+            const resolved = getResolvedSource();
+            document.getElementById('downloadBtn').disabled = !resolved;
+            const note = document.getElementById('source-resolved-note');
+            if (resolved) {
+                note.style.display = 'block';
+                note.textContent = 'Every sample in the downloaded template will be linked to this source.';
+            } else {
+                note.style.display = 'none';
+            }
+        }
+
         function downloadTemplate() {
+            const resolved = getResolvedSource();
+            if (!resolved) return;
             const params = new URLSearchParams({
+                source_type: resolved.type,
                 include_demographics: document.getElementById('optDemographics').checked,
                 include_specimens: document.getElementById('optSpecimens').checked,
                 valid_taxa_only: document.getElementById('optValidTaxaOnly').checked
             });
+            if (resolved.lit_id) params.set('source_lit_id', resolved.lit_id);
+            if (resolved.project_id) params.set('source_project_id', resolved.project_id);
+            if (resolved.detail) params.set('source_other_detail', resolved.detail);
             window.location.href = `/api/v1/batch/template?${params}`;
         }
 
@@ -231,6 +375,7 @@
 
             const counts = data.counts || {};
             document.getElementById('report-summary').innerHTML = `
+                ${data.source ? `<p class="subtext" style="flex-basis:100%; margin-bottom:2px;"><b>Source:</b> ${data.source}</p>` : ''}
                 <div class="report-stat"><b>${counts.samples ?? 0}</b>Samples</div>
                 <div class="report-stat"><b>${counts.observations ?? 0}</b>Observations</div>
                 <div class="report-stat"><b>${counts.demographics ?? 0}</b>Demographics</div>
@@ -284,8 +429,9 @@
                 let resultHtml = `
                     <p class="subtext" style="margin-top:12px;">
                         Created ${data.samples_created} sample(s), ${data.observations_created} observation(s),
-                        ${data.demographics_created} demographic group(s), ${data.specimens_created} specimen(s).
-                        ${data.auto_verified ? 'Auto-accepted (superuser upload).' : 'Submitted for review - see the <a href="/review">Review Queue</a>.'}
+                        ${data.demographics_created} demographic group(s), ${data.specimens_created} specimen(s) -
+                        all linked to: <b>${data.source}</b>.
+                        ${data.auto_verified ? ' Auto-accepted (superuser upload).' : ' Submitted for review - see the <a href="/review">Review Queue</a>.'}
                     </p>
                 `;
                 if (data.queued_for_taxonomy_review && data.queued_for_taxonomy_review.length > 0) {
