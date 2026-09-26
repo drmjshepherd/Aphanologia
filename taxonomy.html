@@ -163,6 +163,7 @@
 <body>
     <div id="header">
         <a href="/" style="color: white; text-decoration: none;"><h1>Aphanologia: Taxonomy Browser</h1></a>
+        <a href="/literature">Literature</a>
 
         <div id="search-wrapper">
             <input type="text" id="taxonSearchBox" placeholder="Search taxon or synonym (min 3 letters)..." autocomplete="off">
@@ -347,6 +348,11 @@
             return wrapper;
         }
 
+        // Remembers the last taxon looked at, so returning to this page
+        // (in the same browser tab) picks up where you left off instead
+        // of always starting back at the tree root.
+        const LAST_TAXON_KEY = 'aphanologia_taxonomy_last_taxon';
+
         // Highlights a row (by taxonID) and loads its details - used
         // both by ordinary clicks and by search selection
         function selectNode(taxonId) {
@@ -358,6 +364,7 @@
                 entry.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
             loadDetail(taxonId);
+            try { sessionStorage.setItem(LAST_TAXON_KEY, taxonId); } catch (err) { /* ignore */ }
         }
 
         async function loadDetail(taxonId) {
@@ -495,7 +502,26 @@
             }
         }
 
-        loadRoot();
+        loadRoot().then(restoreLastPosition);
+
+        // On arrival: an explicit ?taxon_id= in the URL always wins (a
+        // deliberate deep link, e.g. from another page); failing that,
+        // fall back to whatever was last viewed in this tab, so
+        // navigating back to the browser resumes where you left off.
+        async function restoreLastPosition() {
+            const params = new URLSearchParams(window.location.search);
+            const urlTaxonId = params.get('taxon_id');
+            if (urlTaxonId) {
+                await goToTaxon(urlTaxonId);
+                return;
+            }
+            try {
+                const lastId = sessionStorage.getItem(LAST_TAXON_KEY);
+                if (lastId) {
+                    await goToTaxon(lastId);
+                }
+            } catch (err) { /* ignore - just don't restore */ }
+        }
 
         // ----------------------------------------------------------------
         // SEARCH: text box + live dropdown, and the logic to open the
