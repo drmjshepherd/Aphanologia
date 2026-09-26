@@ -112,6 +112,7 @@
         .taxon-result-row:hover { background: #e9ecef; }
         .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
         .taxon-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
+        .taxon-result-row .authorship-tag { font-size: 0.78rem; color: #495057; margin-left: 6px; }
         #obs-taxon-selected {
             margin-top: 6px; font-size: 0.85rem; color: #2d6a4f; font-weight: 600; font-style: italic;
         }
@@ -1018,11 +1019,11 @@
                     data.results.forEach(t => {
                         const row = document.createElement('div');
                         row.className = 'taxon-result-row';
-                        row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank} &middot; ${t.taxonomic_status}</span>`;
+                        row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="authorship-tag">${t.authorship || ''}</span><span class="rank-tag">${t.taxon_rank} &middot; ${t.taxonomic_status}</span>`;
                         row.addEventListener('click', () => {
                             selectedTaxonId = t.taxon_id;
-                            obsSearchBox.value = t.scientific_name;
-                            document.getElementById('obs-taxon-selected').textContent = `Selected: ${t.scientific_name} (taxonID ${t.taxon_id})`;
+                            obsSearchBox.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
+                            document.getElementById('obs-taxon-selected').textContent = `Selected: ${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''} (taxonID ${t.taxon_id})`;
                             obsDropdown.classList.remove('visible');
                         });
                         obsDropdown.appendChild(row);
