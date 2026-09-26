@@ -23,17 +23,27 @@
         .panel { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 18px 20px; margin-bottom: 20px; }
 
         .taxon-search-wrapper { position: relative; }
-        #taxon-search-dropdown {
+        .taxon-dropdown-box {
             position: absolute; top: 100%; left: 0; right: 0; background: white;
             border: 1px solid #ced4da; border-top: none; max-height: 380px; overflow-y: auto;
             z-index: 100; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
-        #taxon-search-dropdown.visible { display: block; }
+        .taxon-dropdown-box.visible { display: block; }
         .taxon-result-row { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid #f1f3f5; font-size: 0.88rem; }
         .taxon-result-row:hover { background: #e9ecef; }
         .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
         .taxon-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
         .taxon-result-row .status-tag { font-size: 0.72rem; color: #b08d1f; margin-left: 6px; }
+
+        #global-status { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 16px; display: none; }
+        #global-status.success { display: block; background: #e9f5ee; color: #1b4332; border: 1px solid #b7e4c7; }
+        #global-status.error { display: block; background: #fbebec; color: #842029; border: 1px solid #e5a6ab; }
+
+        .session-edit-row { border-top: 1px solid #f1f3f5; padding: 8px 0; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        .session-edit-row:first-child { border-top: none; }
+        .session-edit-row .se-name { font-style: italic; color: #1b4332; }
+        .session-edit-row .se-fields { color: #6c757d; font-size: 0.78rem; }
+        .session-edit-row .se-time { color: #adb5bd; font-size: 0.76rem; white-space: nowrap; }
 
         input[type=text], input[type=search], select, textarea {
             width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid #ced4da;
@@ -44,6 +54,8 @@
         .field-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
         .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
         .field.full { flex-basis: 100%; }
+        .field.checkbox-field { flex-direction: row; align-items: center; gap: 8px; }
+        .field.checkbox-field input[type=checkbox] { width: auto; }
         .field label { font-weight: 600; font-size: 0.78rem; color: #2d6a4f; }
         .field .hint { font-size: 0.74rem; color: #868e96; font-weight: normal; }
 
@@ -97,12 +109,14 @@
             <h2>Taxonomy Editor</h2>
             <p class="subtext">Search for a taxon to rename, reparent, mark as a synonym, or edit its details. Every save is logged with who made the change and what changed.</p>
 
+            <div id="global-status"></div>
+
             <div class="panel">
                 <div class="field full">
                     <label for="mainTaxonSearch">Search taxa</label>
                     <div class="taxon-search-wrapper">
                         <input type="text" id="mainTaxonSearch" placeholder="e.g. Veigaia or Oribatida" autocomplete="off">
-                        <div id="taxon-search-dropdown"></div>
+                        <div id="taxon-search-dropdown" class="taxon-dropdown-box"></div>
                     </div>
                 </div>
                 <div id="create-toggle">
@@ -141,7 +155,7 @@
                             <label>Parent taxon</label>
                             <div class="taxon-search-wrapper">
                                 <input type="text" id="newParentSearch" placeholder="Search for parent..." autocomplete="off">
-                                <div id="new-parent-dropdown" class="taxon-search-wrapper"></div>
+                                <div id="new-parent-dropdown" class="taxon-dropdown-box"></div>
                             </div>
                             <div class="picker-current" id="newParentCurrent"><span class="placeholder">Not set</span></div>
                         </div>
@@ -149,7 +163,7 @@
                             <label>OR: accepted name (creates a synonym instead)</label>
                             <div class="taxon-search-wrapper">
                                 <input type="text" id="newAcceptedSearch" placeholder="Search for accepted taxon..." autocomplete="off">
-                                <div id="new-accepted-dropdown" class="taxon-search-wrapper"></div>
+                                <div id="new-accepted-dropdown" class="taxon-dropdown-box"></div>
                             </div>
                             <div class="picker-current" id="newAcceptedCurrent"><span class="placeholder">Not set</span></div>
                         </div>
@@ -171,6 +185,11 @@
                         <span class="save-status" id="createStatus"></span>
                     </div>
                 </div>
+            </div>
+
+            <div id="session-edits-panel" class="panel" style="display:none;">
+                <h2 style="font-size:1rem;">Edits made this session</h2>
+                <div id="sessionEditsList"></div>
             </div>
 
             <div id="edit-panel" class="panel" style="display:none;">
@@ -209,7 +228,7 @@
                         <label>Parent taxon <span class="hint">(reparent within the hierarchy)</span></label>
                         <div class="taxon-search-wrapper">
                             <input type="text" id="editParentSearch" placeholder="Search to change parent..." autocomplete="off">
-                            <div id="edit-parent-dropdown" class="taxon-search-wrapper"></div>
+                            <div id="edit-parent-dropdown" class="taxon-dropdown-box"></div>
                         </div>
                         <div class="picker-current" id="editParentCurrent"><span class="placeholder">None (top-level taxon)</span></div>
                     </div>
@@ -217,7 +236,7 @@
                         <label>Accepted name <span class="hint">(set this to mark as a synonym)</span></label>
                         <div class="taxon-search-wrapper">
                             <input type="text" id="editAcceptedSearch" placeholder="Search to mark as synonym of..." autocomplete="off">
-                            <div id="edit-accepted-dropdown" class="taxon-search-wrapper"></div>
+                            <div id="edit-accepted-dropdown" class="taxon-dropdown-box"></div>
                         </div>
                         <div class="picker-current" id="editAcceptedCurrent"><span class="placeholder">Not a synonym</span></div>
                     </div>
@@ -238,7 +257,59 @@
 
                 <div class="save-row">
                     <button type="button" onclick="saveTaxonEdit()">Save changes</button>
+                    <button type="button" class="secondary" onclick="returnToSearchView()">Cancel</button>
                     <span class="save-status" id="editStatus"></span>
+                </div>
+            </div>
+
+            <div id="literature-panel" class="panel" style="display:none;">
+                <h2 style="font-size:1rem;">Linked literature</h2>
+                <p class="subtext">References this taxon's name, synonymy, or UK presence is based on, or identification keys that cover it.</p>
+                <div id="literatureLinksList"></div>
+
+                <h2 style="font-size:0.95rem; margin-top:18px;">Add a reference</h2>
+                <div class="field-row">
+                    <div class="field full">
+                        <label for="litSearchInput">Search literature</label>
+                        <div class="taxon-search-wrapper">
+                            <input type="text" id="litSearchInput" placeholder="Search author, title, year..." autocomplete="off">
+                            <div id="lit-search-dropdown" class="taxon-dropdown-box"></div>
+                        </div>
+                        <div class="picker-current" id="litSelectedCurrent"><span class="placeholder">No reference selected</span></div>
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="litType">Relationship type *</label>
+                        <select id="litType">
+                            <option value="Taxonomy or synonymy from">Taxonomy or synonymy from</option>
+                            <option value="Name first published in">Name first published in</option>
+                            <option value="As used in">As used in</option>
+                            <option value="Presence in UK from">Presence in UK from</option>
+                        </select>
+                    </div>
+                    <div class="field checkbox-field">
+                        <label for="litIsIdKey" style="margin:0;">Identification key</label>
+                        <input type="checkbox" id="litIsIdKey">
+                    </div>
+                    <div class="field" id="litKeyScopeField" style="display:none;">
+                        <label for="litKeyScope">Key covers rank</label>
+                        <input type="text" id="litKeyScope" list="rankOptions" placeholder="e.g. Family">
+                    </div>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="litAccessNotes">Access notes</label>
+                        <input type="text" id="litAccessNotes" placeholder="e.g. Behind paywall, library copy only">
+                    </div>
+                    <div class="field">
+                        <label for="litOnlineUrl">Online resource URL <span class="hint">(if different from the reference's own URL)</span></label>
+                        <input type="text" id="litOnlineUrl">
+                    </div>
+                </div>
+                <div class="save-row">
+                    <button type="button" class="secondary" onclick="addLiteratureLink()">Add link</button>
+                    <span class="save-status" id="litAddStatus"></span>
                 </div>
             </div>
 
@@ -297,7 +368,10 @@
             const input = document.getElementById(inputId);
             const dropdown = document.getElementById(dropdownId);
             let timer = null;
+            let suppressNextSearch = false;
+
             input.addEventListener('input', () => {
+                if (suppressNextSearch) { suppressNextSearch = false; return; }
                 clearTimeout(timer);
                 const query = input.value.trim();
                 if (query.length < 3) {
@@ -319,7 +393,9 @@
                                 row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank || ''}</span><span class="status-tag">${t.taxonomic_status || ''}</span>`;
                                 row.addEventListener('click', () => {
                                     dropdown.classList.remove('visible');
-                                    input.value = '';
+                                    dropdown.innerHTML = '';
+                                    suppressNextSearch = true;
+                                    input.value = t.scientific_name;
                                     onPick(t);
                                 });
                                 dropdown.appendChild(row);
@@ -331,9 +407,15 @@
                     }
                 }, 300);
             });
+
+            // Close the dropdown on any click outside the input and the
+            // dropdown itself - scoped to just this picker's own two
+            // elements, not a shared CSS class, so one picker's dropdown
+            // can never be closed (or left open) by clicks meant for
+            // another picker elsewhere on the page.
             document.addEventListener('click', (e) => {
-                if (!e.target.closest('.taxon-search-wrapper') || e.target !== input) {
-                    if (!dropdown.contains(e.target)) dropdown.classList.remove('visible');
+                if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.classList.remove('visible');
                 }
             });
         }
@@ -344,6 +426,7 @@
         let editingTaxonId = null;
         let editParentId = null;
         let editAcceptedId = null;
+        let sessionEdits = [];
 
         async function loadTaxonForEdit(taxonId) {
             const res = await fetch(`/api/v1/taxonomy/detail/${encodeURIComponent(taxonId)}`);
@@ -365,10 +448,15 @@
 
             updatePickerDisplay('editParentCurrent', t.parent_scientific_name, t.parentNameUsageID, 'None (top-level taxon)', clearEditParent);
             updatePickerDisplay('editAcceptedCurrent', t.accepted_scientific_name, t.acceptedNameUsageID, 'Not a synonym', clearEditAccepted);
+            document.getElementById('editParentSearch').value = '';
+            document.getElementById('editAcceptedSearch').value = '';
 
             document.getElementById('edit-panel').style.display = 'block';
+            document.getElementById('literature-panel').style.display = 'block';
             setSaveStatus('editStatus', '', '');
             loadHistory(t.taxonID);
+            loadLiteratureLinks(t.taxonID);
+            clearLitSelection();
         }
 
         function updatePickerDisplay(elId, label, id, placeholder, clearFn) {
@@ -381,8 +469,16 @@
             }
         }
 
-        function clearEditParent() { editParentId = null; updatePickerDisplay('editParentCurrent', null, null, 'None (top-level taxon)', clearEditParent); }
-        function clearEditAccepted() { editAcceptedId = null; updatePickerDisplay('editAcceptedCurrent', null, null, 'Not a synonym', clearEditAccepted); }
+        function clearEditParent() {
+            editParentId = null;
+            document.getElementById('editParentSearch').value = '';
+            updatePickerDisplay('editParentCurrent', null, null, 'None (top-level taxon)', clearEditParent);
+        }
+        function clearEditAccepted() {
+            editAcceptedId = null;
+            document.getElementById('editAcceptedSearch').value = '';
+            updatePickerDisplay('editAcceptedCurrent', null, null, 'Not a synonym', clearEditAccepted);
+        }
 
         wireTaxonPicker('editParentSearch', 'edit-parent-dropdown', (t) => {
             editParentId = t.taxon_id;
@@ -399,10 +495,52 @@
             el.className = 'save-status' + (cls ? ' ' + cls : '');
         }
 
+        function setGlobalStatus(text, cls) {
+            const el = document.getElementById('global-status');
+            el.textContent = text;
+            el.className = cls || '';
+        }
+
+        function returnToSearchView() {
+            document.getElementById('edit-panel').style.display = 'none';
+            document.getElementById('literature-panel').style.display = 'none';
+            document.getElementById('history-panel').style.display = 'none';
+            document.getElementById('mainTaxonSearch').value = '';
+            editingTaxonId = null;
+        }
+
+        function recordSessionEdit(taxonID, scientificName, changedFields, actionType) {
+            sessionEdits.unshift({ taxonID, scientificName, changedFields, actionType, when: new Date() });
+            renderSessionEdits();
+        }
+
+        function renderSessionEdits() {
+            const panel = document.getElementById('session-edits-panel');
+            const list = document.getElementById('sessionEditsList');
+            if (sessionEdits.length === 0) { panel.style.display = 'none'; return; }
+            panel.style.display = 'block';
+            list.innerHTML = '';
+            sessionEdits.forEach(e => {
+                const row = document.createElement('div');
+                row.className = 'session-edit-row';
+                const fieldsText = e.changedFields.length ? e.changedFields.join(', ') : e.actionType;
+                row.innerHTML = `
+                    <div><span class="se-name">${e.scientificName}</span> <span class="se-fields">(${e.taxonID}) &middot; ${fieldsText}</span></div>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span class="se-time">${e.when.toLocaleTimeString()}</span>
+                        <button type="button" class="small secondary" onclick="loadTaxonForEdit('${e.taxonID}')">Reopen</button>
+                    </div>
+                `;
+                list.appendChild(row);
+            });
+        }
+
         async function saveTaxonEdit() {
             if (!editingTaxonId) return;
+            const taxonID = editingTaxonId;
+            const scientificName = document.getElementById('editScientificName').value;
             const payload = {
-                scientificName: document.getElementById('editScientificName').value,
+                scientificName: scientificName,
                 scientificnameAuthorship: document.getElementById('editAuthorship').value,
                 taxonrank: document.getElementById('editRank').value,
                 taxonomicStatus: document.getElementById('editStatus').value,
@@ -414,7 +552,7 @@
             };
             setSaveStatus('editStatus', 'Saving...', '');
             try {
-                const res = await fetch(`/api/v1/admin/taxonomy/${encodeURIComponent(editingTaxonId)}`, {
+                const res = await fetch(`/api/v1/admin/taxonomy/${encodeURIComponent(taxonID)}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -426,10 +564,11 @@
                 }
                 if (data.changed_fields.length === 0) {
                     setSaveStatus('editStatus', 'No changes to save.', '');
-                } else {
-                    setSaveStatus('editStatus', `Saved (${data.changed_fields.join(', ')}).`, 'success');
-                    loadHistory(editingTaxonId);
+                    return;
                 }
+                recordSessionEdit(taxonID, scientificName, data.changed_fields, 'taxonomy_edit');
+                setGlobalStatus(`Saved changes to ${scientificName} (${data.changed_fields.join(', ')}).`, 'success');
+                returnToSearchView();
             } catch (err) {
                 setSaveStatus('editStatus', 'Save failed: ' + err, 'error');
             }
@@ -443,22 +582,32 @@
         let newParentId = null;
         let newAcceptedId = null;
 
+        function clearNewParent() {
+            newParentId = null;
+            document.getElementById('newParentSearch').value = '';
+            updatePickerDisplay('newParentCurrent', null, null, 'Not set', clearNewParent);
+        }
+        function clearNewAccepted() {
+            newAcceptedId = null;
+            document.getElementById('newAcceptedSearch').value = '';
+            updatePickerDisplay('newAcceptedCurrent', null, null, 'Not set', clearNewAccepted);
+        }
+
         wireTaxonPicker('newParentSearch', 'new-parent-dropdown', (t) => {
             newParentId = t.taxon_id;
-            newAcceptedId = null;
-            updatePickerDisplay('newParentCurrent', t.scientific_name, t.taxon_id, '', () => { newParentId = null; updatePickerDisplay('newParentCurrent', null, null, 'Not set', () => {}); });
-            updatePickerDisplay('newAcceptedCurrent', null, null, 'Not set', () => {});
+            clearNewAccepted();
+            updatePickerDisplay('newParentCurrent', t.scientific_name, t.taxon_id, '', clearNewParent);
         });
         wireTaxonPicker('newAcceptedSearch', 'new-accepted-dropdown', (t) => {
             newAcceptedId = t.taxon_id;
-            newParentId = null;
-            updatePickerDisplay('newAcceptedCurrent', t.scientific_name, t.taxon_id, '', () => { newAcceptedId = null; updatePickerDisplay('newAcceptedCurrent', null, null, 'Not set', () => {}); });
-            updatePickerDisplay('newParentCurrent', null, null, 'Not set', () => {});
+            clearNewParent();
+            updatePickerDisplay('newAcceptedCurrent', t.scientific_name, t.taxon_id, '', clearNewAccepted);
         });
 
         async function createTaxon() {
+            const scientificName = document.getElementById('newScientificName').value;
             const payload = {
-                scientificName: document.getElementById('newScientificName').value,
+                scientificName: scientificName,
                 scientificnameAuthorship: document.getElementById('newAuthorship').value,
                 taxonrank: document.getElementById('newRank').value,
                 taxonomicStatus: document.getElementById('newStatus').value,
@@ -479,7 +628,20 @@
                     setSaveStatus('createStatus', data.detail || 'Could not create taxon.', 'error');
                     return;
                 }
-                setSaveStatus('createStatus', `Created ${data.taxonID}.`, 'success');
+                setSaveStatus('createStatus', '', '');
+                recordSessionEdit(data.taxonID, scientificName, [], 'taxonomy_create');
+                setGlobalStatus(`Created ${scientificName} (${data.taxonID}).`, 'success');
+                // Reset the create form and collapse it, then jump straight
+                // into editing the new taxon (e.g. to attach literature).
+                document.getElementById('newScientificName').value = '';
+                document.getElementById('newAuthorship').value = '';
+                document.getElementById('newRank').value = '';
+                document.getElementById('newStatus').value = 'accepted';
+                document.getElementById('newRemarks').value = '';
+                document.getElementById('newNotes').value = '';
+                clearNewParent();
+                clearNewAccepted();
+                document.getElementById('create-panel').classList.remove('visible');
                 loadTaxonForEdit(data.taxonID);
             } catch (err) {
                 setSaveStatus('createStatus', 'Failed: ' + err, 'error');
@@ -519,6 +681,163 @@
                 });
             } catch (err) {
                 list.innerHTML = '<div class="no-history">Could not load history.</div>';
+            }
+        }
+
+        // ---------- literature linking ----------
+        let selectedLitId = null;
+
+        (function wireLiteraturePicker() {
+            const input = document.getElementById('litSearchInput');
+            const dropdown = document.getElementById('lit-search-dropdown');
+            let timer = null;
+            let suppressNextSearch = false;
+
+            input.addEventListener('input', () => {
+                if (suppressNextSearch) { suppressNextSearch = false; return; }
+                clearTimeout(timer);
+                const q = input.value.trim();
+                if (q.length < 2) {
+                    dropdown.classList.remove('visible');
+                    dropdown.innerHTML = '';
+                    return;
+                }
+                timer = setTimeout(async () => {
+                    try {
+                        const res = await fetch(`/api/v1/literature/search?q=${encodeURIComponent(q)}&limit=15`);
+                        const data = await res.json();
+                        dropdown.innerHTML = '';
+                        if (data.results.length === 0) {
+                            dropdown.innerHTML = '<div class="taxon-result-row">No matches</div>';
+                        } else {
+                            data.results.forEach(r => {
+                                const row = document.createElement('div');
+                                row.className = 'taxon-result-row';
+                                row.textContent = r.formatted_ref;
+                                row.addEventListener('click', () => {
+                                    selectedLitId = r.lit_id;
+                                    dropdown.classList.remove('visible');
+                                    dropdown.innerHTML = '';
+                                    suppressNextSearch = true;
+                                    input.value = r.formatted_ref;
+                                    document.getElementById('litSelectedCurrent').innerHTML =
+                                        `Selected: <i>${r.formatted_ref}</i> <button type="button" class="clear" onclick="clearLitSelection()">clear</button>`;
+                                });
+                                dropdown.appendChild(row);
+                            });
+                        }
+                        dropdown.classList.add('visible');
+                    } catch (err) {
+                        dropdown.classList.remove('visible');
+                    }
+                }, 300);
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.classList.remove('visible');
+                }
+            });
+        })();
+
+        function clearLitSelection() {
+            selectedLitId = null;
+            document.getElementById('litSearchInput').value = '';
+            document.getElementById('litSelectedCurrent').innerHTML = '<span class="placeholder">No reference selected</span>';
+        }
+
+        document.getElementById('litIsIdKey').addEventListener('change', (e) => {
+            document.getElementById('litKeyScopeField').style.display = e.target.checked ? 'flex' : 'none';
+        });
+
+        async function loadLiteratureLinks(taxonId) {
+            const list = document.getElementById('literatureLinksList');
+            list.innerHTML = 'Loading...';
+            try {
+                const res = await fetch(`/api/v1/admin/taxonomy/${encodeURIComponent(taxonId)}/literature-links`);
+                const data = await res.json();
+                if (data.links.length === 0) {
+                    list.innerHTML = '<div class="no-history">No literature linked yet.</div>';
+                    return;
+                }
+                list.innerHTML = '';
+                data.links.forEach(l => {
+                    const div = document.createElement('div');
+                    div.className = 'history-entry';
+                    const keyTag = l.is_identification_key
+                        ? ` &middot; identification key${l.key_scope_rank ? ' (' + l.key_scope_rank + ')' : ''}`
+                        : '';
+                    div.innerHTML = `
+                        <div class="history-meta"><b>${l.Type}</b>${keyTag}</div>
+                        <div class="history-diff-row">${l.formatted_ref}</div>
+                        ${l.access_notes ? `<div class="history-notes">${l.access_notes}</div>` : ''}
+                        <button type="button" class="small secondary" style="margin-top:6px;" data-type="${l.Type}" data-lit="${l.litID}">Remove</button>
+                    `;
+                    div.querySelector('button').addEventListener('click', (e) => {
+                        removeLiteratureLink(taxonId, e.target.dataset.type, e.target.dataset.lit);
+                    });
+                    list.appendChild(div);
+                });
+            } catch (err) {
+                list.innerHTML = '<div class="no-history">Could not load literature links.</div>';
+            }
+        }
+
+        async function addLiteratureLink() {
+            if (!editingTaxonId) return;
+            if (!selectedLitId) {
+                setSaveStatus('litAddStatus', 'Search for and select a reference first.', 'error');
+                return;
+            }
+            const payload = {
+                litID: selectedLitId,
+                Type: document.getElementById('litType').value,
+                is_identification_key: document.getElementById('litIsIdKey').checked,
+                key_scope_rank: document.getElementById('litKeyScope').value || null,
+                online_resource_url: document.getElementById('litOnlineUrl').value || null,
+                access_notes: document.getElementById('litAccessNotes').value || null,
+                notes: null
+            };
+            setSaveStatus('litAddStatus', 'Adding...', '');
+            try {
+                const res = await fetch(`/api/v1/admin/taxonomy/${encodeURIComponent(editingTaxonId)}/literature-links`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    setSaveStatus('litAddStatus', data.detail || 'Could not add link.', 'error');
+                    return;
+                }
+                setSaveStatus('litAddStatus', 'Added.', 'success');
+                clearLitSelection();
+                document.getElementById('litKeyScope').value = '';
+                document.getElementById('litAccessNotes').value = '';
+                document.getElementById('litOnlineUrl').value = '';
+                document.getElementById('litIsIdKey').checked = false;
+                document.getElementById('litKeyScopeField').style.display = 'none';
+                loadLiteratureLinks(editingTaxonId);
+            } catch (err) {
+                setSaveStatus('litAddStatus', 'Failed: ' + err, 'error');
+            }
+        }
+
+        async function removeLiteratureLink(taxonId, type, litId) {
+            if (!confirm('Remove this literature link?')) return;
+            try {
+                const res = await fetch(
+                    `/api/v1/admin/taxonomy/${encodeURIComponent(taxonId)}/literature-links?type=${encodeURIComponent(type)}&lit_id=${encodeURIComponent(litId)}`,
+                    { method: 'DELETE' }
+                );
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.detail || 'Could not remove link.');
+                    return;
+                }
+                loadLiteratureLinks(taxonId);
+            } catch (err) {
+                alert('Failed: ' + err);
             }
         }
     </script>
