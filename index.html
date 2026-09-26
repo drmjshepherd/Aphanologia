@@ -42,6 +42,7 @@
         .taxon-search-result-row:hover { background: #e9ecef; }
         .taxon-search-result-row .sci-name { font-style: italic; color: #1b4332; }
         .taxon-search-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
+        .taxon-search-result-row .authorship-tag { font-size: 0.78rem; color: #495057; margin-left: 6px; }
         .control-group input, .control-group select {
             padding: 8px;
             border: 1px solid #ced4da;
@@ -83,7 +84,7 @@
     <div id="container">
         <div id="sidebar">
             <div class="control-group">
-                <label for="taxonSearch">Taxon Filter (Name / Genus / Family)</label>
+                <label for="taxonSearch">Taxon to Map</label>
                 <div class="taxon-search-wrapper">
                     <input type="text" id="taxonSearch" placeholder="e.g. Veigaia or Oribatida" autocomplete="off">
                     <div id="taxon-search-dropdown"></div>
@@ -183,10 +184,10 @@
                         data.results.forEach(t => {
                             const row = document.createElement('div');
                             row.className = 'taxon-search-result-row';
-                            row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank}</span>`;
+                            row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="authorship-tag">${t.authorship || ''}</span><span class="rank-tag">${t.taxon_rank}</span>`;
                             row.addEventListener('click', () => {
                                 overrideTaxonId = t.taxon_id;
-                                taxonSearchBox.value = t.scientific_name;
+                                taxonSearchBox.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
                                 taxonSearchDropdown.classList.remove('visible');
                                 loadMapData();
                             });
