@@ -87,6 +87,7 @@
         .sci-name { font-style: italic; color: #1b4332; margin-left: 4px; }
         .authorship { color: #6c757d; font-size: 0.85rem; margin-left: 6px; }
         .rank-tag { color: #adb5bd; font-size: 0.75rem; margin-left: 6px; }
+        .authorship-tag { color: #495057; font-size: 0.8rem; margin-left: 6px; }
 
         .status-badge {
             font-size: 0.7rem;
@@ -594,12 +595,13 @@
                         row.className = 'search-result-row';
                         row.innerHTML = `
                             <span class="sci-name">${t.scientific_name}</span>
+                            <span class="authorship-tag">${t.authorship || ''}</span>
                             <span class="rank-tag">${t.taxon_rank}</span>
                             <span class="status-tag">${t.taxonomic_status}</span>
                         `;
                         row.addEventListener('click', () => {
                             dropdown.classList.remove('visible');
-                            searchBox.value = t.scientific_name;
+                            searchBox.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
                             goToTaxon(t.taxon_id);
                         });
                         dropdown.appendChild(row);
