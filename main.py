@@ -603,7 +603,7 @@ from fastapi.responses import FileResponse
 # to proper cloud storage later, only this function needs to change -
 # every URL the website already generated will keep working exactly
 # as before.
-MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive" # <--- Update path to folder containing media archive
+MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
 
 @app.get("/api/v1/media/{media_id}")
 def get_media_file(media_id: int = Path(..., description="The media_id from observation_media")):
@@ -1123,7 +1123,7 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
         new_id = f"WEB-{cursor.fetchone()['nextval']}"
 
         # Compose the dataSource[free text] summary. Historic rows in
-        # this column hold plain descriptive text (e.g. "A. User
+        # this column hold plain descriptive text (e.g. "A.N.Other
         # personal collection") - new rows follow the same
         # spirit, built from the structured category/link the
         # contributor picked, so the column stays readable at a glance
@@ -1215,9 +1215,17 @@ BATCH_MAX_TEMPLATE_ROWS = 500  # generous fixed size for dropdown source ranges 
 BATCH_SAMPLE_HEADERS = [
     "Sample Ref*", "samplingLocation", "decimalLatitude", "decimalLongitude",
     "coordinateUncertaintyInMeters", "earliestDateCollected", "latestDateCollected",
-    "habitat", "microhabitat", "SHADe", "samplingProtocol", "recordedBy", "eventRemarks",
-    "sourceCategory", "sourceOtherDetail"
+    "habitat", "microhabitat", "SHADe", "samplingProtocol", "recordedBy", "eventRemarks"
 ]
+BATCH_SOURCE_TYPES = {
+    "Published literature",
+    "Formal project or survey",
+    "Museum or institutional collection",
+    "Recording event",
+    "Personal collection",
+    "Other",
+}
+
 BATCH_OBSERVATION_HEADERS = [
     "Observation Ref*", "Sample Ref*", "Species*", "Species found?",
     "identifiedBy", "identificationVerificationStatus", "identificationRemarks",
@@ -1230,10 +1238,6 @@ BATCH_DEMOGRAPHIC_HEADERS = [
 BATCH_SPECIMEN_HEADERS = [
     "Demographic Ref*", "specCount", "specLocation", "specRef",
     "specPreservation", "specType", "specComments"
-]
-BATCH_SOURCE_CATEGORIES = [
-    "Personal collection", "Formal project or survey", "Published literature",
-    "Museum or institutional collection", "Recording event", "Other"
 ]
 BATCH_SEX_OPTIONS = ["male", "female", "undetermined", "mixed"]
 BATCH_LIFESTAGE_OPTIONS = [
@@ -1273,11 +1277,17 @@ def _batch_add_dropdown(ws, col_letter, source_formula, first_row=2, last_row=No
     dv.add(f"{col_letter}{first_row}:{col_letter}{last_row}")
 
 
-def _build_batch_template(include_demographics: bool, include_specimens: bool, taxa: list):
+def _build_batch_template(include_demographics: bool, include_specimens: bool, taxa: list, source: dict):
     """
     Builds the downloadable multi-sheet workbook. taxa is a list of
     dicts (taxon_id, scientific_name, authorship, rank, status) for
-    the read-only Taxon Lookup reference sheet.
+    the read-only Taxon Lookup reference sheet. source is
+    {"source_type", "source_lit_id", "source_project_id",
+    "source_other_detail", "source_display"} - fixed for the entire
+    batch and written into a locked "Upload Source" sheet, since with
+    batches running to hundreds of samples, linking each one
+    individually afterwards would be impractical. Every sample this
+    template produces gets exactly this one source.
     """
     include_specimens = include_specimens and include_demographics  # specimens need demographics to attach to
 
@@ -1288,6 +1298,8 @@ def _build_batch_template(include_demographics: bool, include_specimens: bool, t
     ws_instr.column_dimensions["A"].width = 100
     instructions = [
         "Aphanologia batch upload template",
+        "",
+        f"This template is locked to one source: {source['source_display']}. Every sample you add here will be linked to it - see the 'Upload Source' sheet.",
         "",
         "1. Fill in the Samples sheet first - one row per sampling event. Give each one a short, unique 'Sample Ref' (e.g. 'Site A visit 1') - this is just for linking rows within this file, it is not stored in the database.",
         "2. Fill in the Observations sheet - one row per species record. Pick the Sample Ref from the dropdown. Type the species name as accurately as you can; the 'Species found?' column will tell you if it matches something already in the database.",
@@ -1300,15 +1312,32 @@ def _build_batch_template(include_demographics: bool, include_specimens: bool, t
         "5. Species names that don't match anything in the Taxon Lookup sheet are NOT rejected - they'll be queued for a superuser to review as a possible new record, once you upload.",
         "6. Save the file and upload it on the Batch Upload page. You'll see a validation report before anything is saved to the database.",
         "7. The whole upload succeeds or fails together - if any row has a structural problem (e.g. a Sample Ref that doesn't match anything on the Samples sheet), fix it and re-upload; nothing partial gets saved.",
+        "8. Need a different source? Download a fresh template for it rather than editing the Upload Source sheet - it's locked, and mixing sources in one file isn't supported.",
     ]
     for i, line in enumerate(instructions, start=1):
         ws_instr.cell(row=i, column=1, value=line)
     ws_instr["A1"].font = Font(bold=True, size=14)
 
+    ws_source = wb.create_sheet("Upload Source")
+    ws_source.column_dimensions["A"].width = 22
+    ws_source.column_dimensions["B"].width = 70
+    source_rows = [
+        ("Source Type", source["source_type"]),
+        ("Literature ID", source.get("source_lit_id") or ""),
+        ("Project ID", source.get("source_project_id") or ""),
+        ("Other Detail", source.get("source_other_detail") or ""),
+        ("Description", source["source_display"]),
+    ]
+    for i, (label, value) in enumerate(source_rows, start=1):
+        label_cell = ws_source.cell(row=i, column=1, value=label)
+        label_cell.font = Font(bold=True, color="1B4332")
+        ws_source.cell(row=i, column=2, value=value)
+    ws_source.cell(row=7, column=1, value="This sheet is locked - every sample in this file is linked to the source above. Download a separate template for a different source.").font = Font(italic=True, color="6C757D")
+    ws_source.protection.sheet = True  # every cell defaults to locked; no cells are unlocked, so the whole sheet is read-only
+
     ws_samples = wb.create_sheet("Samples")
     _batch_style_header_row(ws_samples, BATCH_SAMPLE_HEADERS)
     _batch_add_table(ws_samples, BATCH_SAMPLE_HEADERS, "SamplesTable")
-    _batch_add_dropdown(ws_samples, "N", '"' + ",".join(BATCH_SOURCE_CATEGORIES) + '"')
 
     ws_obs = wb.create_sheet("Observations")
     _batch_style_header_row(ws_obs, BATCH_OBSERVATION_HEADERS)
@@ -1377,30 +1406,45 @@ def _batch_sheet_to_rows(ws):
 def _batch_parse_workbook(file_bytes: bytes):
     """
     Loads the uploaded workbook and returns (samples, observations,
-    demographics, specimens, parse_errors). demographics/specimens
-    are empty lists if those sheets aren't present (a 2-sheet
-    upload). parse_errors is non-empty only for structural workbook
-    problems (missing required sheets) that make further validation
+    demographics, specimens, source, parse_errors). demographics/
+    specimens are empty lists if those sheets aren't present (a
+    2-sheet upload). source is the fixed batch-wide sample source
+    read back from the locked "Upload Source" sheet. parse_errors is
+    non-empty only for structural workbook problems (missing required
+    sheets, or a missing/invalid source) that make further validation
     meaningless.
     """
     parse_errors = []
     try:
         wb = load_workbook(io.BytesIO(file_bytes), data_only=False)
     except Exception as e:
-        return [], [], [], [], [f"Could not read this file as an Excel workbook: {str(e)}"]
+        return [], [], [], [], {}, [f"Could not read this file as an Excel workbook: {str(e)}"]
 
     if "Samples" not in wb.sheetnames:
         parse_errors.append("Missing required 'Samples' sheet.")
     if "Observations" not in wb.sheetnames:
         parse_errors.append("Missing required 'Observations' sheet.")
+    if "Upload Source" not in wb.sheetnames:
+        parse_errors.append("Missing required 'Upload Source' sheet - this file wasn't generated by the Batch Upload template, or that sheet has been deleted.")
     if parse_errors:
-        return [], [], [], [], parse_errors
+        return [], [], [], [], {}, parse_errors
+
+    ws_source = wb["Upload Source"]
+    source = {
+        "source_type": (ws_source["B1"].value or "").strip() if ws_source["B1"].value else None,
+        "source_lit_id": (ws_source["B2"].value or "").strip() if ws_source["B2"].value else None,
+        "source_project_id": (ws_source["B3"].value or "").strip() if ws_source["B3"].value else None,
+        "source_other_detail": (ws_source["B4"].value or "").strip() if ws_source["B4"].value else None,
+    }
+    if not source["source_type"] or source["source_type"] not in BATCH_SOURCE_TYPES:
+        parse_errors.append("The 'Upload Source' sheet is missing or has an invalid Source Type - please download a fresh template rather than editing this sheet.")
+        return [], [], [], [], {}, parse_errors
 
     samples = _batch_sheet_to_rows(wb["Samples"])
     observations = _batch_sheet_to_rows(wb["Observations"])
     demographics = _batch_sheet_to_rows(wb["Demographics"]) if "Demographics" in wb.sheetnames else []
     specimens = _batch_sheet_to_rows(wb["Specimens"]) if "Specimens" in wb.sheetnames else []
-    return samples, observations, demographics, specimens, []
+    return samples, observations, demographics, specimens, source, []
 
 
 def _batch_validate(samples, observations, demographics, specimens):
@@ -1486,7 +1530,7 @@ def _batch_resolve_taxa(cursor, observations):
     resolution = {}
     unmatched_names = set()
     for o in observations:
-        species = (o.get("Species*") or "").strip()
+        species = str(o.get("Species*") if o.get("Species*") is not None else "").strip()
         if not species:
             continue
         cursor.execute('SELECT "taxonID" FROM taxonomy WHERE LOWER("scientificName") = LOWER(%s) LIMIT 1;', (species,))
@@ -1499,8 +1543,43 @@ def _batch_resolve_taxa(cursor, observations):
     return resolution, sorted(unmatched_names)
 
 
+def _batch_resolve_source(cursor, source: dict):
+    """
+    Re-verifies the source embedded in the workbook at commit/validate
+    time rather than trusting it blindly - a template could have been
+    downloaded weeks before being uploaded, and the literature entry
+    or project it pointed at could have been deleted or edited since.
+    Returns (display_text, error_message) - exactly one is set.
+    """
+    source_type = source.get("source_type")
+    if source_type == "Published literature":
+        cursor.execute("""
+            SELECT CONCAT_WS(', ', "authorName", "yearPublished", "articleTitle", "publicationTitle") AS ref
+            FROM literature WHERE "litID" = %s;
+        """, (source.get("source_lit_id"),))
+        row = cursor.fetchone()
+        if not row:
+            return None, f"The literature reference this template was linked to (litID {source.get('source_lit_id')}) no longer exists - download a fresh template."
+        return f"Published literature: {row['ref']}", None
+    elif source_type == "Formal project or survey":
+        cursor.execute("SELECT project_name FROM recording_projects WHERE project_id = %s;", (source.get("source_project_id"),))
+        row = cursor.fetchone()
+        if not row:
+            return None, f"The project this template was linked to (id {source.get('source_project_id')}) no longer exists - download a fresh template."
+        return f"Formal project or survey: {row['project_name']}", None
+    elif source_type in BATCH_SOURCE_TYPES:
+        detail = str(source.get("source_other_detail")).strip() if source.get("source_other_detail") is not None else ""
+        return f"{source_type}{': ' + detail if detail else ''}", None
+    else:
+        return None, "Missing or invalid source information in the 'Upload Source' sheet - download a fresh template."
+
+
 @app.get("/api/v1/batch/template")
 def download_batch_template(
+    source_type: str = Query(..., description="One of: " + ", ".join(sorted(BATCH_SOURCE_TYPES))),
+    source_lit_id: Optional[str] = Query(None, description="Required when source_type is 'Published literature'"),
+    source_project_id: Optional[int] = Query(None, description="Required when source_type is 'Formal project or survey'"),
+    source_other_detail: Optional[str] = Query(None, description="Required for Museum, Recording event, and Other; optional for Personal collection"),
     include_demographics: bool = Query(True),
     include_specimens: bool = Query(True),
     valid_taxa_only: bool = Query(True),
@@ -1512,7 +1591,16 @@ def download_batch_template(
     valid_taxa_only controls what shows on the in-workbook Taxon
     Lookup reference sheet only - it does not restrict what can
     actually be typed into the Species column (see _batch_resolve_taxa).
+
+    Every sample this template produces is linked to exactly one
+    source - required here, not per-row, because linking each sample
+    individually after the fact doesn't scale once a batch runs to
+    hundreds of rows. The resolved source is embedded in a locked
+    sheet in the workbook and applied to every sample at commit time.
     """
+    if source_type not in BATCH_SOURCE_TYPES:
+        raise HTTPException(status_code=400, detail=f"source_type must be one of {sorted(BATCH_SOURCE_TYPES)}")
+
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1529,11 +1617,42 @@ def download_batch_template(
                 FROM taxonomy ORDER BY "scientificName";
             """)
         taxa = cursor.fetchall()
+
+        source = {"source_type": source_type, "source_lit_id": None, "source_project_id": None, "source_other_detail": None}
+        if source_type == "Published literature":
+            if not source_lit_id:
+                raise HTTPException(status_code=400, detail="source_lit_id is required when source_type is 'Published literature'")
+            cursor.execute("""
+                SELECT CONCAT_WS(', ', "authorName", "yearPublished", "articleTitle", "publicationTitle") AS ref
+                FROM literature WHERE "litID" = %s;
+            """, (source_lit_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail=f"No literature entry found with litID {source_lit_id}")
+            source["source_lit_id"] = source_lit_id
+            source["source_display"] = f"Published literature: {row['ref']}"
+        elif source_type == "Formal project or survey":
+            if not source_project_id:
+                raise HTTPException(status_code=400, detail="source_project_id is required when source_type is 'Formal project or survey'")
+            cursor.execute("SELECT project_name FROM recording_projects WHERE project_id = %s;", (source_project_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail=f"No project found with id {source_project_id}")
+            source["source_project_id"] = str(source_project_id)
+            source["source_display"] = f"Formal project or survey: {row['project_name']}"
+        elif source_type == "Personal collection":
+            source["source_other_detail"] = source_other_detail
+            source["source_display"] = f"Personal collection{': ' + source_other_detail if source_other_detail else ''}"
+        else:  # Museum or institutional collection / Recording event / Other
+            if not source_other_detail or not source_other_detail.strip():
+                raise HTTPException(status_code=400, detail=f"source_other_detail is required when source_type is '{source_type}'")
+            source["source_other_detail"] = source_other_detail
+            source["source_display"] = f"{source_type}: {source_other_detail}"
     finally:
         cursor.close()
         conn.close()
 
-    wb = _build_batch_template(include_demographics, include_specimens, taxa)
+    wb = _build_batch_template(include_demographics, include_specimens, taxa, source)
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -1556,26 +1675,30 @@ async def validate_batch_upload(file: UploadFile = File(...), user: dict = Depen
     can never lead to a bad commit.
     """
     file_bytes = await file.read()
-    samples, observations, demographics, specimens, parse_errors = _batch_parse_workbook(file_bytes)
+    samples, observations, demographics, specimens, source, parse_errors = _batch_parse_workbook(file_bytes)
     if parse_errors:
-        return {"can_commit": False, "errors": [{"sheet": None, "row": None, "message": m} for m in parse_errors], "unmatched_taxa": []}
+        return {"can_commit": False, "errors": [{"sheet": None, "row": None, "message": m} for m in parse_errors], "unmatched_taxa": [], "source": None}
 
     errors = _batch_validate(samples, observations, demographics, specimens)
 
     unmatched_taxa = []
-    if not any(e["sheet"] == "Observations" and e["row"] is None for e in errors):
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        try:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        source_display, source_error = _batch_resolve_source(cursor, source)
+        if source_error:
+            errors.append({"sheet": "Upload Source", "row": None, "message": source_error})
+        if not any(e["sheet"] == "Observations" and e["row"] is None for e in errors):
             _, unmatched_taxa = _batch_resolve_taxa(cursor, observations)
-        finally:
-            cursor.close()
-            conn.close()
+    finally:
+        cursor.close()
+        conn.close()
 
     return {
         "can_commit": len(errors) == 0,
         "errors": errors,
         "unmatched_taxa": unmatched_taxa,
+        "source": source_display,
         "counts": {
             "samples": len(samples),
             "observations": len(observations),
@@ -1590,17 +1713,22 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
     """
     Re-validates, then - only if that validation is completely clean
     of Pass 1/Pass 2 errors - writes every sample, observation,
-    demographic, and specimen in one transaction. An unmatched
-    species name never blocks this; that observation is created with
-    taxonID NULL and proposed_taxon_name set instead, ready for
-    superuser review. Superusers/hyperusers get every observation
-    auto-accepted (verification_status = 'verified', with a matching
-    row logged in observation_verification_actions so the audit
-    trail still shows how it was verified) - contributors' uploads
-    go to the same pending review queue as a single manual submission.
+    demographic, and specimen in one transaction. Every sample gets
+    linked to the one source embedded in the workbook (see
+    _batch_resolve_source) via the same sample_literature_junction/
+    sample_project_junction tables the admin tools use, so a
+    135-sample batch never needs linking one row at a time afterwards.
+    An unmatched species name never blocks this; that observation is
+    created with taxonID NULL and proposed_taxon_name set instead,
+    ready for superuser review. Superusers/hyperusers get every
+    observation auto-accepted (verification_status = 'verified', with
+    a matching row logged in observation_verification_actions so the
+    audit trail still shows how it was verified) - contributors'
+    uploads go to the same pending review queue as a single manual
+    submission.
     """
     file_bytes = await file.read()
-    samples, observations, demographics, specimens, parse_errors = _batch_parse_workbook(file_bytes)
+    samples, observations, demographics, specimens, source, parse_errors = _batch_parse_workbook(file_bytes)
     if parse_errors:
         raise HTTPException(status_code=400, detail="; ".join(parse_errors))
 
@@ -1613,6 +1741,10 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        source_display, source_error = _batch_resolve_source(cursor, source)
+        if source_error:
+            raise HTTPException(status_code=400, detail=source_error)
+
         taxon_resolution, unmatched_taxa = _batch_resolve_taxa(cursor, observations)
 
         # --- Samples ---
@@ -1622,10 +1754,13 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
             new_event_id = f"WEB-{cursor.fetchone()['nextval']}"
             sample_ref_to_event_id[str(s.get("Sample Ref*") if s.get("Sample Ref*") is not None else "").strip()] = new_event_id
 
-            source_category = s.get("sourceCategory") or None
-            data_source_summary = source_category
-            if s.get("sourceOtherDetail"):
-                data_source_summary = f"{source_category}: {s['sourceOtherDetail']}" if source_category else s["sourceOtherDetail"]
+            # Only "Museum/institutional collection", "Recording event",
+            # "Personal collection" and "Other" have no dedicated DB
+            # entity to link to - those go in dataSource[free text].
+            # Literature and Project sources get a real linked row in
+            # their junction table instead (see below), same as a
+            # single manual sample submission would.
+            free_text_source = source_display if source["source_type"] not in ("Published literature", "Formal project or survey") else None
 
             cursor.execute("""
                 INSERT INTO samples (
@@ -1640,7 +1775,7 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
                 new_event_id, s.get("samplingLocation"), s.get("decimalLatitude"), s.get("decimalLongitude"),
                 s.get("coordinateUncertaintyInMeters"), s.get("earliestDateCollected"), s.get("latestDateCollected"),
                 s.get("habitat"), s.get("microhabitat"), s.get("SHADe"), s.get("samplingProtocol"),
-                s.get("recordedBy"), s.get("eventRemarks"), data_source_summary,
+                s.get("recordedBy"), s.get("eventRemarks"), free_text_source,
                 user["user_id"], user["display_name"]
             ))
             if s.get("decimalLatitude") is not None and s.get("decimalLongitude") is not None:
@@ -1648,6 +1783,15 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
                     UPDATE samples SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s::float8, %s::float8), 4326)
                     WHERE "eventID" = %s;
                 """, (s["decimalLongitude"], s["decimalLatitude"], new_event_id))
+
+            if source["source_type"] == "Published literature":
+                cursor.execute("""
+                    INSERT INTO sample_literature_junction ("eventID", "Type", "litID") VALUES (%s, %s, %s);
+                """, (new_event_id, "source of record", source["source_lit_id"]))
+            elif source["source_type"] == "Formal project or survey":
+                cursor.execute("""
+                    INSERT INTO sample_project_junction ("eventID", project_id, type) VALUES (%s, %s, %s);
+                """, (new_event_id, int(source["source_project_id"]), "source of record"))
 
         # --- Observations ---
         observation_ref_to_id = {}
@@ -1727,6 +1871,7 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         conn.commit()
         return {
             "message": "Batch upload committed.",
+            "source": source_display,
             "samples_created": len(sample_ref_to_event_id),
             "observations_created": len(observation_ref_to_id),
             "demographics_created": len(demographic_ref_to_id),
