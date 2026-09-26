@@ -1123,7 +1123,7 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
         new_id = f"WEB-{cursor.fetchone()['nextval']}"
 
         # Compose the dataSource[free text] summary. Historic rows in
-        # this column hold plain descriptive text (e.g. "A.N.Other
+        # this column hold plain descriptive text (e.g. "A.N. Other
         # personal collection") - new rows follow the same
         # spirit, built from the structured category/link the
         # contributor picked, so the column stays readable at a glance
@@ -1382,6 +1382,21 @@ def _build_batch_template(include_demographics: bool, include_specimens: bool, t
     return wb
 
 
+def _batch_cell_str(value):
+    """
+    Safely coerces an Excel cell value to a stripped string. Openpyxl
+    returns numeric cells as int/float, not str - a plain
+    (value or "").strip() blows up with an unhandled AttributeError
+    the moment a Sample/Observation/Demographic Ref or a Species name
+    is typed as a bare number (e.g. "1"), and because it's unhandled,
+    FastAPI returns a plain-text 500 page rather than JSON, which then
+    fails to parse in the browser ("Unexpected token 'I'..." from
+    "Internal Server Error"). None becomes "" ; anything else becomes
+    str(value) ; only then is it stripped.
+    """
+    return str(value).strip() if value is not None else ""
+
+
 def _batch_sheet_to_rows(ws):
     """
     Reads a header-row sheet into a list of dicts keyed by header
@@ -1461,7 +1476,7 @@ def _batch_validate(samples, observations, demographics, specimens):
 
     sample_refs = {}
     for s in samples:
-        ref = str(s.get("Sample Ref*") if s.get("Sample Ref*") is not None else "").strip()
+        ref = _batch_cell_str(s.get("Sample Ref*"))
         if not ref:
             errors.append({"sheet": "Samples", "row": s["_row"], "message": "Sample Ref is required."})
             continue
@@ -1475,9 +1490,9 @@ def _batch_validate(samples, observations, demographics, specimens):
 
     observation_refs = {}
     for o in observations:
-        obs_ref = str(o.get("Observation Ref*") if o.get("Observation Ref*") is not None else "").strip()
-        sample_ref = str(o.get("Sample Ref*") if o.get("Sample Ref*") is not None else "").strip()
-        species = str(o.get("Species*") if o.get("Species*") is not None else "").strip()
+        obs_ref = _batch_cell_str(o.get("Observation Ref*"))
+        sample_ref = _batch_cell_str(o.get("Sample Ref*"))
+        species = _batch_cell_str(o.get("Species*"))
         if not obs_ref:
             errors.append({"sheet": "Observations", "row": o["_row"], "message": "Observation Ref is required."})
         elif obs_ref in observation_refs:
@@ -1496,8 +1511,8 @@ def _batch_validate(samples, observations, demographics, specimens):
 
     demographic_refs = {}
     for d in demographics:
-        demo_ref = str(d.get("Demographic Ref*") if d.get("Demographic Ref*") is not None else "").strip()
-        obs_ref = str(d.get("Observation Ref*") if d.get("Observation Ref*") is not None else "").strip()
+        demo_ref = _batch_cell_str(d.get("Demographic Ref*"))
+        obs_ref = _batch_cell_str(d.get("Observation Ref*"))
         if not demo_ref:
             errors.append({"sheet": "Demographics", "row": d["_row"], "message": "Demographic Ref is required."})
         elif demo_ref in demographic_refs:
@@ -1510,7 +1525,7 @@ def _batch_validate(samples, observations, demographics, specimens):
             errors.append({"sheet": "Demographics", "row": d["_row"], "message": f"Observation Ref '{obs_ref}' does not match any row on the Observations sheet."})
 
     for sp in specimens:
-        demo_ref = str(sp.get("Demographic Ref*") if sp.get("Demographic Ref*") is not None else "").strip()
+        demo_ref = _batch_cell_str(sp.get("Demographic Ref*"))
         if not demo_ref:
             errors.append({"sheet": "Specimens", "row": sp["_row"], "message": "Demographic Ref is required."})
         elif demo_ref not in demographic_refs:
@@ -1530,7 +1545,7 @@ def _batch_resolve_taxa(cursor, observations):
     resolution = {}
     unmatched_names = set()
     for o in observations:
-        species = str(o.get("Species*") if o.get("Species*") is not None else "").strip()
+        species = _batch_cell_str(o.get("Species*"))
         if not species:
             continue
         cursor.execute('SELECT "taxonID" FROM taxonomy WHERE LOWER("scientificName") = LOWER(%s) LIMIT 1;', (species,))
@@ -1568,7 +1583,7 @@ def _batch_resolve_source(cursor, source: dict):
             return None, f"The project this template was linked to (id {source.get('source_project_id')}) no longer exists - download a fresh template."
         return f"Formal project or survey: {row['project_name']}", None
     elif source_type in BATCH_SOURCE_TYPES:
-        detail = str(source.get("source_other_detail")).strip() if source.get("source_other_detail") is not None else ""
+        detail = source.get("source_other_detail")
         return f"{source_type}{': ' + detail if detail else ''}", None
     else:
         return None, "Missing or invalid source information in the 'Upload Source' sheet - download a fresh template."
@@ -1752,7 +1767,7 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for s in samples:
             cursor.execute("SELECT nextval('web_eventid_seq');")
             new_event_id = f"WEB-{cursor.fetchone()['nextval']}"
-            sample_ref_to_event_id[str(s.get("Sample Ref*") if s.get("Sample Ref*") is not None else "").strip()] = new_event_id
+            sample_ref_to_event_id[_batch_cell_str(s.get("Sample Ref*"))] = new_event_id
 
             # Only "Museum/institutional collection", "Recording event",
             # "Personal collection" and "Other" have no dedicated DB
@@ -1799,9 +1814,9 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for o in observations:
             cursor.execute("SELECT nextval('web_observationid_seq');")
             new_obs_id = f"WEB-{cursor.fetchone()['nextval']}"
-            observation_ref_to_id[str(o.get("Observation Ref*") if o.get("Observation Ref*") is not None else "").strip()] = new_obs_id
+            observation_ref_to_id[_batch_cell_str(o.get("Observation Ref*"))] = new_obs_id
 
-            event_id = sample_ref_to_event_id[str(o.get("Sample Ref*") if o.get("Sample Ref*") is not None else "").strip()]
+            event_id = sample_ref_to_event_id[_batch_cell_str(o.get("Sample Ref*"))]
             resolved = taxon_resolution.get(o["_row"], {"taxon_id": None, "proposed_name": None})
 
             cursor.execute("""
@@ -1839,8 +1854,8 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for d in demographics:
             cursor.execute("SELECT nextval('web_demographicid_seq');")
             new_demo_id = f"WEB-{cursor.fetchone()['nextval']}"
-            demographic_ref_to_id[str(d.get("Demographic Ref*") if d.get("Demographic Ref*") is not None else "").strip()] = new_demo_id
-            obs_id = observation_ref_to_id[str(d.get("Observation Ref*") if d.get("Observation Ref*") is not None else "").strip()]
+            demographic_ref_to_id[_batch_cell_str(d.get("Demographic Ref*"))] = new_demo_id
+            obs_id = observation_ref_to_id[_batch_cell_str(d.get("Observation Ref*"))]
 
             cursor.execute("""
                 INSERT INTO observation_demographics (
@@ -1856,7 +1871,7 @@ async def commit_batch_upload(file: UploadFile = File(...), user: dict = Depends
         for sp in specimens:
             cursor.execute("SELECT nextval('web_specimenid_seq');")
             new_spec_id = f"WEB-{cursor.fetchone()['nextval']}"
-            demo_id = demographic_ref_to_id[str(sp.get("Demographic Ref*") if sp.get("Demographic Ref*") is not None else "").strip()]
+            demo_id = demographic_ref_to_id[_batch_cell_str(sp.get("Demographic Ref*"))]
 
             cursor.execute("""
                 INSERT INTO specimens (
