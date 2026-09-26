@@ -454,8 +454,13 @@
         function openTaxonFromUrlIfPresent() {
             const params = new URLSearchParams(window.location.search);
             const taxonId = params.get('taxon_id');
+            const newTaxonName = params.get('new_taxon_name');
             if (taxonId) {
                 loadTaxonForEdit(taxonId);
+            } else if (newTaxonName) {
+                document.getElementById('create-panel').classList.add('visible');
+                document.getElementById('newScientificName').value = newTaxonName;
+                document.getElementById('newScientificName').scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
 
