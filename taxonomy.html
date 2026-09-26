@@ -158,7 +158,34 @@
             text-decoration: none;
             font-weight: bold;
         }
-        #edit-taxon-btn:hover { background: #fff8e6; }
+		#edit-taxon-btn:hover { background: #fff8e6; }
+		#add-child-taxon-btn {
+            display: inline-block;
+            margin-top: 10px;
+            margin-left: 8px;
+            background: none;
+            border: 1px solid #d4a017;
+            color: #7a5c00;
+            padding: 9px 15px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+		#add-child-taxon-btn:hover { background: #fff8e6; }
+		#add-synonym-btn {
+            display: inline-block;
+            margin-top: 10px;
+            margin-left: 8px;
+            background: none;
+            border: 1px solid #d4a017;
+            color: #7a5c00;
+            padding: 9px 15px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+		#add-synonym-btn:hover { background: #fff8e6; }
+
     </style>
 </head>
 <body>
@@ -410,7 +437,11 @@
                         <div class="detail-value">${t.taxonRemarks}</div>
                     </div>` : ''}
                     <a id="view-on-map-btn" href="/map?taxon_id=${t.taxonID}">View records on map</a>
-                    ${isSuperuser ? `<a id="edit-taxon-btn" href="/admin/taxonomy?taxon_id=${t.taxonID}">Edit taxon</a>` : ''}
+                    ${isSuperuser ? `
+						<a id="edit-taxon-btn" href="/admin/taxonomy?taxon_id=${t.taxonID}">Edit taxon</a>
+						<a id="add-child-taxon-btn" href="/admin/taxonomy?mode=add_child&taxon_id=${t.taxonID}&taxon_name=${encodeURIComponent(t.scientificName)}&taxon_rank=${encodeURIComponent(t.taxonrank)}">Add child taxon</a>
+						<a id="add-synonym-btn" href="/admin/taxonomy?mode=add_synonym&taxon_id=${t.taxonID}&taxon_name=${encodeURIComponent(t.scientificName)}&taxon_rank=${encodeURIComponent(t.taxonrank)}">Add synonym</a>
+					` : ''}
                     <div id="photo-gallery"><span class="loading-text">Loading photos...</span></div>
                     <div id="literature-section"><span class="loading-text">Loading literature...</span></div>
                 `;
