@@ -185,6 +185,8 @@
     </datalist>
 
     <script src="/static/js/literature_widget.js"></script>
+    <script src="/static/js/shade_widget.js"></script>
+    <script src="/static/js/sample_dropdown_options.js"></script>
     <script>
         let currentUser = null;
         let isSuperuser = false;
@@ -416,27 +418,40 @@
                     <div class="field"><label>BNG Northing (Y)</label><input type="text" id="s-bngy" value="${esc(s.bngy)}"></div>
                 </div>
                 <div class="field-row">
-                    <div class="field"><label>Earliest date collected</label><input type="text" id="s-startdate" value="${esc(s.earliestDateCollected)}"></div>
-                    <div class="field"><label>Latest date collected</label><input type="text" id="s-enddate" value="${esc(s.latestDateCollected)}"></div>
+                    <div class="field">
+                        <label>Earliest possible date</label>
+                        <input type="date" id="s-startdate" min="1600-01-01">
+                        <span class="hint" id="s-startdate-hint"></span>
+                    </div>
+                    <div class="field">
+                        <label>Latest possible date</label>
+                        <input type="date" id="s-enddate" min="1600-01-01">
+                        <span class="hint" id="s-enddate-hint"></span>
+                    </div>
                     <div class="field"><label>Recorded by</label><input type="text" id="s-recordedby" value="${esc(s.recordedBy)}"></div>
                 </div>
                 <div class="field-row">
-                    <div class="field"><label>Habitat</label><input type="text" id="s-habitat" value="${esc(s.habitat)}"></div>
+                    <div class="field"><label>Habitat</label><select id="s-habitat"></select></div>
                     <div class="field"><label>Microhabitat</label><input type="text" id="s-microhabitat" value="${esc(s.microhabitat)}"></div>
-                    <div class="field"><label>SHADe</label><input type="text" id="s-shade" value="${esc(s.SHADe)}"></div>
+                    <div class="field">
+                        <label>SHADe</label>
+                        <input type="text" id="s-shade" value="${esc(s.SHADe)}">
+                        <button type="button" class="secondary small" style="margin-top:6px;" onclick="toggleShadePicker()">Open SHADe picker</button>
+                        <div id="shade-picker-container" style="display:none; margin-top:8px;"></div>
+                    </div>
                 </div>
                 <div class="field-row">
-                    <div class="field"><label>Sampling protocol</label><input type="text" id="s-protocol" value="${esc(s.samplingProtocol)}"></div>
+                    <div class="field"><label>Sampling protocol</label><select id="s-protocol"></select></div>
                     <div class="field"><label>Sample size value</label><input type="text" id="s-sizevalue" value="${esc(s.samplesizeValue)}"></div>
                     <div class="field"><label>Sample size unit</label><input type="text" id="s-sizeunit" value="${esc(s.samplesizeUnit)}"></div>
                 </div>
                 <div class="field-row">
-                    <div class="field full"><label>Event remarks</label><textarea id="s-remarks">${esc(s.eventRemarks)}</textarea></div>
+                    <div class="field full"><label>General remarks</label><textarea id="s-remarks">${esc(s.eventRemarks)}</textarea></div>
                 </div>
                 <div class="field-row">
                     <div class="field"><label>Data restricted</label><input type="text" id="s-restricted" value="${esc(s.datarestricted)}"></div>
                     <div class="field"><label>Licence holder</label><input type="text" id="s-licenceholder" value="${esc(s.licenceHolder)}"></div>
-                    <div class="field full"><label>Data source</label><input type="text" id="s-datasource" value="${esc(s["dataSource[free text]"])}"></div>
+                    <div class="field full"><label>Data source notes <span class="hint">(not a substitute for a real literature/project link below)</span></label><input type="text" id="s-datasource" value="${esc(s["dataSource[free text]"])}"></div>
                 </div>
                 <div class="field-row">
                     <div class="field full"><label>Reason for this edit <span class="hint">(saved to the activity log)</span></label><textarea id="s-notes"></textarea></div>
@@ -505,6 +520,15 @@
                 l => removeSampleProjectLink(l.project_id, l.type));
             renderObservationsList(data.observations);
 
+            populateSelectWithLegacyTolerance('s-habitat', SampleDropdownOptions.HABITATS, s.habitat);
+            populateSelectWithLegacyTolerance('s-protocol', SampleDropdownOptions.SAMPLING_PROTOCOLS, s.samplingProtocol);
+            setDateFieldSafely('s-startdate', s.earliestDateCollected);
+            setDateFieldSafely('s-enddate', s.latestDateCollected);
+
+            document.getElementById('shade-picker-container').innerHTML = '';
+            document.getElementById('shade-picker-container').style.display = 'none';
+            window.shadePickerHandle = null;
+
             window.sampleLitWidget = LiteratureWidget.mount(document.getElementById('sampleLitWidgetContainer'), {
                 placeholder: 'Search author, title, year...',
                 onSelected: (lit) => { window.sampleLitSelection = lit; }
@@ -519,6 +543,60 @@
                 window.newObsTaxonSelection = t;
                 document.getElementById('newObsTaxonCurrent').innerHTML = `<i>${t.scientific_name}</i> <span style="color:#adb5bd;">(${t.taxon_id})</span>`;
             });
+        }
+
+        // A dropdown enforces the standard list going forward, but an
+        // existing value that predates the list (or was typed as free
+        // text before this was a dropdown) is added as an extra option
+        // rather than silently discarded - so opening an old sample
+        // for editing never shows a blank field where a real value
+        // used to be, and never risks wiping it out on save.
+        function populateSelectWithLegacyTolerance(selectId, options, currentValue) {
+            const sel = document.getElementById(selectId);
+            sel.innerHTML = '<option value="">-- Select --</option>' + options.map(o => `<option value="${o}">${o}</option>`).join('');
+            if (currentValue && !options.includes(currentValue)) {
+                const opt = document.createElement('option');
+                opt.value = currentValue;
+                opt.textContent = `${currentValue} (existing value, not in the standard list)`;
+                sel.insertBefore(opt, sel.firstChild.nextSibling);
+            }
+            sel.value = currentValue || '';
+        }
+
+        // Dates are stored as free text in the database (some historic
+        // records aren't strict ISO dates), but <input type="date">
+        // only accepts an exact YYYY-MM-DD value - anything else is
+        // silently rejected by the browser and the field just shows
+        // blank. To avoid that turning into silent data loss on save,
+        // the original raw text is kept on the input's dataset, and
+        // saveSample() falls back to it whenever the date picker itself
+        // is left empty.
+        function setDateFieldSafely(inputId, rawValue) {
+            const input = document.getElementById(inputId);
+            const hint = document.getElementById(inputId + '-hint');
+            input.dataset.original = rawValue || '';
+            if (rawValue && /^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+                input.value = rawValue;
+                hint.textContent = '';
+            } else {
+                input.value = '';
+                hint.textContent = rawValue ? `Existing value: "${rawValue}" (kept unless you set a new date)` : '';
+            }
+        }
+
+        function toggleShadePicker() {
+            const container = document.getElementById('shade-picker-container');
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                if (!window.shadePickerHandle) {
+                    window.shadePickerHandle = ShadeWidget.mount(container, {
+                        initialCode: document.getElementById('s-shade').value || null,
+                        onChange: (code) => { if (code) document.getElementById('s-shade').value = code; }
+                    });
+                }
+            } else {
+                container.style.display = 'none';
+            }
         }
 
         function esc(v) { return (v === null || v === undefined) ? '' : String(v).replace(/"/g, '&quot;'); }
@@ -587,8 +665,8 @@
                 bngx: document.getElementById('s-bngx').value || null,
                 bngy: document.getElementById('s-bngy').value || null,
                 gridRef: document.getElementById('s-gridref').value || null,
-                earliestDateCollected: document.getElementById('s-startdate').value || null,
-                latestDateCollected: document.getElementById('s-enddate').value || null,
+                earliestDateCollected: document.getElementById('s-startdate').value || document.getElementById('s-startdate').dataset.original || null,
+                latestDateCollected: document.getElementById('s-enddate').value || document.getElementById('s-enddate').dataset.original || null,
                 habitat: document.getElementById('s-habitat').value || null,
                 microhabitat: document.getElementById('s-microhabitat').value || null,
                 SHADe: document.getElementById('s-shade').value || null,
@@ -817,7 +895,6 @@
                 <div class="field-row">
                     <div class="field checkbox-field"><input type="checkbox" id="o-nbn" ${o.share_with_nbn ? 'checked' : ''}><label for="o-nbn" style="margin:0;">Share with NBN</label></div>
                     <div class="field checkbox-field"><input type="checkbox" id="o-gbif" ${o.share_with_gbif ? 'checked' : ''}><label for="o-gbif" style="margin:0;">Share with GBIF</label></div>
-                    <div class="field"><label>Coordinate uncertainty (m)</label><input type="number" id="o-coorduncert" value="${o.coordinate_uncertainty_meters ?? ''}"></div>
                 </div>
                 <div class="field-row">
                     <div class="field full"><label>Reason for this edit <span class="hint">(saved to the activity log)</span></label><textarea id="o-notes"></textarea></div>
@@ -944,7 +1021,6 @@
                 occurrenceRemarks: document.getElementById('o-occremarks').value || null,
                 share_with_nbn: document.getElementById('o-nbn').checked,
                 share_with_gbif: document.getElementById('o-gbif').checked,
-                coordinate_uncertainty_meters: document.getElementById('o-coorduncert').value ? parseInt(document.getElementById('o-coorduncert').value) : null,
                 notes: document.getElementById('o-notes').value || null
             };
             setSaveStatus('obsSaveMsg', 'Saving...', '');
