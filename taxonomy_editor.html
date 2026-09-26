@@ -439,12 +439,26 @@
             if (currentUser && (currentUser.role === 'superuser' || currentUser.role === 'hyperuser')) {
                 gate.style.display = 'none';
                 content.style.display = 'block';
+                openTaxonFromUrlIfPresent();
             } else {
                 gate.style.display = 'block';
                 content.style.display = 'none';
                 gate.textContent = currentUser
                     ? 'This tool is restricted to superusers.'
                     : 'Please sign in with a superuser account to use the taxonomy editor.';
+            }
+        }
+
+        // If arriving via a link like /admin/taxonomy?taxon_id=WEB-12
+        // (e.g. the "Edit taxon" link on the taxonomy browser page),
+        // open that taxon straight into the edit form - skipping the
+        // usual search-then-preview-then-edit steps, since following
+        // such a link already signals a specific, deliberate choice.
+        function openTaxonFromUrlIfPresent() {
+            const params = new URLSearchParams(window.location.search);
+            const taxonId = params.get('taxon_id');
+            if (taxonId) {
+                loadTaxonForEdit(taxonId);
             }
         }
 
