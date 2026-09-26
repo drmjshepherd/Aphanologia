@@ -145,6 +145,19 @@
             font-weight: bold;
         }
         #view-on-map-btn:hover { background: #1b4332; }
+        #edit-taxon-btn {
+            display: inline-block;
+            margin-top: 10px;
+            margin-left: 8px;
+            background: none;
+            border: 1px solid #d4a017;
+            color: #7a5c00;
+            padding: 9px 15px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        #edit-taxon-btn:hover { background: #fff8e6; }
     </style>
 </head>
 <body>
@@ -169,6 +182,17 @@
     </div>
 
     <script>
+        // Used to conditionally show an "Edit taxon" link in the detail
+        // panel for superusers/hyperusers only - checked once at page
+        // load, same auth endpoint used by every other page.
+        let isSuperuser = false;
+        fetch('/api/v1/auth/me')
+            .then(r => r.json())
+            .then(data => {
+                isSuperuser = data.logged_in && (data.role === 'superuser' || data.role === 'hyperuser');
+            })
+            .catch(() => {});
+
         // ----------------------------------------------------------------
         // nodeRegistry keeps a note of every row currently drawn in the
         // tree, keyed by taxonID, so that a search result can find and
@@ -378,6 +402,7 @@
                         <div class="detail-value">${t.taxonRemarks}</div>
                     </div>` : ''}
                     <a id="view-on-map-btn" href="/map?taxon_id=${t.taxonID}">View records on map</a>
+                    ${isSuperuser ? `<a id="edit-taxon-btn" href="/admin/taxonomy?taxon_id=${t.taxonID}">Edit taxon</a>` : ''}
                     <div id="photo-gallery"><span class="loading-text">Loading photos...</span></div>
                     <div id="literature-section"><span class="loading-text">Loading literature...</span></div>
                 `;
