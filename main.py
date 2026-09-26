@@ -74,7 +74,7 @@ def require_contributor(request: Request):
 def require_superuser(request: Request):
     """
     Same pattern as require_contributor, but for tools that should
-    only be available to Matthew and other trusted admins - e.g. the
+    only be available to trusted admins - e.g. the
     schema viewer, and later the review/approval screen. Deliberately
     a separate function (rather than reusing require_contributor with
     a different role list) so each endpoint's permission requirement
@@ -603,7 +603,7 @@ from fastapi.responses import FileResponse
 # to proper cloud storage later, only this function needs to change -
 # every URL the website already generated will keep working exactly
 # as before.
-MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
+MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive" # <--- Update path to folder containing media archive
 
 @app.get("/api/v1/media/{media_id}")
 def get_media_file(media_id: int = Path(..., description="The media_id from observation_media")):
@@ -1123,8 +1123,8 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
         new_id = f"WEB-{cursor.fetchone()['nextval']}"
 
         # Compose the dataSource[free text] summary. Historic rows in
-        # this column hold plain descriptive text (e.g. "Matthew
-        # Shepherd personal collection") - new rows follow the same
+        # this column hold plain descriptive text (e.g. "A. User
+        # personal collection") - new rows follow the same
         # spirit, built from the structured category/link the
         # contributor picked, so the column stays readable at a glance
         # even though the real link now lives in a junction table.
