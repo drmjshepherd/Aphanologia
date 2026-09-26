@@ -117,6 +117,7 @@
         <a class="title-link" href="/"><h1>Aphanologia</h1></a>
         <a class="nav-link" href="/map">Map</a>
         <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/literature">Literature</a>
         <a class="nav-link" href="/review">Review Queue</a>
         <div id="auth-status">Checking sign-in status&hellip;</div>
     </div>
@@ -433,6 +434,7 @@
             if (currentUser && (currentUser.role === 'superuser' || currentUser.role === 'hyperuser')) {
                 gate.style.display = 'none';
                 content.style.display = 'block';
+                renderSessionEdits();
                 openTaxonFromUrlIfPresent();
             } else {
                 gate.style.display = 'block';
@@ -537,7 +539,42 @@
         let editingTaxonId = null;
         let editParentId = null;
         let editAcceptedId = null;
+
+        // Session edits persist in sessionStorage (cleared when the tab
+        // closes, kept across reloads/navigation within it) rather than
+        // a plain in-memory array, so the list actually reflects
+        // "everything I've done since I logged in" as intended, not
+        // just "since I last reloaded this page".
+        const SESSION_EDITS_KEY = 'aphanologia_taxonomy_session_edits';
         let sessionEdits = [];
+        try {
+            const stored = sessionStorage.getItem(SESSION_EDITS_KEY);
+            if (stored) {
+                sessionEdits = JSON.parse(stored).map(e => ({ ...e, when: new Date(e.when) }));
+            }
+        } catch (err) {
+            sessionEdits = [];
+        }
+
+        // Defensive: if a taxon's stored status is a legacy/free-text
+        // value that isn't one of the fixed dropdown options (e.g. an
+        // old value that predates the controlled vocabulary), setting
+        // select.value to it silently selects nothing at all -
+        // leaving the dropdown showing blank and, if saved without
+        // being touched, silently blanking the field in the database.
+        // Inject it as an extra option instead, so it's visible,
+        // selected, and never gets silently discarded.
+        function ensureSelectHasValue(selectEl, value) {
+            if (!value) return;
+            const exists = Array.from(selectEl.options).some(o => o.value === value);
+            if (!exists) {
+                const opt = document.createElement('option');
+                opt.value = value;
+                opt.textContent = `${value} (existing value, not in the standard list)`;
+                selectEl.insertBefore(opt, selectEl.firstChild);
+            }
+            selectEl.value = value;
+        }
 
         async function loadTaxonForEdit(taxonId) {
             const res = await fetch(`/api/v1/taxonomy/detail/${encodeURIComponent(taxonId)}`);
@@ -556,8 +593,8 @@
             document.getElementById('editScientificName').value = t.scientificName || '';
             document.getElementById('editAuthorship').value = t.scientificnameAuthorship || '';
             document.getElementById('editRank').value = t.taxonrank || '';
-            document.getElementById('editTaxonomicStatus').value = t.taxonomicStatus || 'accepted';
-            document.getElementById('editNomenclaturalStatus').value = t.nomenclaturalStatus || '';
+            ensureSelectHasValue(document.getElementById('editTaxonomicStatus'), t.taxonomicStatus || 'accepted');
+            ensureSelectHasValue(document.getElementById('editNomenclaturalStatus'), t.nomenclaturalStatus || '');
             document.getElementById('editRemarks').value = t.taxonRemarks || '';
             document.getElementById('editNotes').value = '';
 
@@ -627,6 +664,9 @@
 
         function recordSessionEdit(taxonID, scientificName, changedFields, actionType) {
             sessionEdits.unshift({ taxonID, scientificName, changedFields, actionType, when: new Date() });
+            try {
+                sessionStorage.setItem(SESSION_EDITS_KEY, JSON.stringify(sessionEdits));
+            } catch (err) { /* storage full or unavailable - session list just won't persist */ }
             renderSessionEdits();
         }
 
@@ -680,10 +720,12 @@
                 const data = await res.json();
                 if (!res.ok) {
                     setSaveStatus('editSaveMsg', data.detail || 'Save failed.', 'error');
+                    setGlobalStatus(`Could not save ${scientificName}: ${data.detail || 'unknown error.'}`, 'error');
                     return;
                 }
                 if (data.changed_fields.length === 0) {
                     setSaveStatus('editSaveMsg', 'No changes to save.', '');
+                    setGlobalStatus(`No changes detected for ${scientificName} - the form stayed open so you can adjust and try again.`, 'info');
                     return;
                 }
                 recordSessionEdit(taxonID, scientificName, data.changed_fields, 'taxonomy_edit');
@@ -695,7 +737,9 @@
                 setGlobalStatus(msg, 'success');
                 returnToSearchView();
             } catch (err) {
+                console.error('saveTaxonEdit failed:', err);
                 setSaveStatus('editSaveMsg', 'Save failed: ' + err, 'error');
+                setGlobalStatus(`Save failed for ${scientificName}: ${err}`, 'error');
             }
         }
 
