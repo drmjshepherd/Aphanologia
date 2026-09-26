@@ -156,7 +156,6 @@
                     ${fieldDisplay('Collection ID', o.collectionID)}
                     ${fieldDisplay('Catalog number', o.catalogNumber)}
                     ${fieldDisplay('Basis of record', o.basisOfRecord)}
-                    ${fieldDisplay('Coordinate uncertainty (m)', o.coordinate_uncertainty_meters)}
                     ${fieldDisplay('Shared with NBN', o.share_with_nbn === true ? 'Yes' : (o.share_with_nbn === false ? 'No' : null))}
                     ${fieldDisplay('Shared with GBIF', o.share_with_gbif === true ? 'Yes' : (o.share_with_gbif === false ? 'No' : null))}
                 </dl>
@@ -181,6 +180,7 @@
                         ${fieldDisplay('Grid reference', s.gridRef)}
                         ${fieldDisplay('Latitude', s.decimalLatitude)}
                         ${fieldDisplay('Longitude', s.decimalLongitude)}
+						${fieldDisplay('Coordinate uncertainty (m)', s.coordinateuncertaintyinmeters)}
                         ${fieldDisplay('Earliest date collected', s.earliestDateCollected)}
                         ${fieldDisplay('Latest date collected', s.latestDateCollected)}
                         ${fieldDisplay('Recorded by', s.recordedBy)}
