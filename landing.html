@@ -52,22 +52,6 @@
         <div id="auth-status" style="margin-top: 15px; font-size: 0.9rem;"></div>
     </div>
 
-    <script>
-        fetch('/api/v1/auth/me')
-            .then(r => r.json())
-            .then(data => {
-                const el = document.getElementById('auth-status');
-                if (data.logged_in) {
-                    el.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout" style="color: #b7e4c7;">Sign out</a>`;
-                } else {
-                    el.innerHTML = `<a href="/auth/login" style="color: white; text-decoration: underline;">Sign in with Google</a>`;
-                }
-                if (data.logged_in && (data.role === 'superuser' || data.role === 'hyperuser')) {
-                    document.getElementById('admin-section').style.display = 'block';
-                }
-            });
-    </script>
-
     <div id="cards">
         <a class="card" href="/map">
             <h2>Distribution Map</h2>
@@ -80,6 +64,10 @@
         <a class="card" href="/submit">
             <h2>Submit Observations</h2>
             <p>Submit details of samples or communities, and add records, demographics and specimen details.</p>
+        </a>
+        <a class="card" href="/literature">
+            <h2>Literature</h2>
+            <p>Search the reference library behind the database's identifications and records.</p>
         </a>
     </div>
 
@@ -110,5 +98,25 @@
             covering the known British Acari fauna.
         </p>
     </div>
+
+    <script>
+        // Placed at the end of body (rather than before the elements it
+        // references) so it never races the HTML parser - on a slow
+        // connection or a fast local fetch, document.getElementById
+        // could otherwise run before #admin-section existed yet.
+        fetch('/api/v1/auth/me')
+            .then(r => r.json())
+            .then(data => {
+                const el = document.getElementById('auth-status');
+                if (data.logged_in) {
+                    el.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout" style="color: #b7e4c7;">Sign out</a>`;
+                } else {
+                    el.innerHTML = `<a href="/auth/login" style="color: white; text-decoration: underline;">Sign in with Google</a>`;
+                }
+                if (data.logged_in && (data.role === 'superuser' || data.role === 'hyperuser')) {
+                    document.getElementById('admin-section').style.display = 'block';
+                }
+            });
+    </script>
 </body>
 </html>
