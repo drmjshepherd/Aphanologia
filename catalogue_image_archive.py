@@ -34,7 +34,7 @@ from database import get_db_connection
 # ---------------------------------------------------------------
 # CONFIGURATION - adjust if needed
 # ---------------------------------------------------------------
-ARCHIVE_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
+ARCHIVE_ROOT = r"C:\path\to\folder\Mesofauna Image Archive" # <--- Update path to folder containing media archive
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.gif'}
 
 TAXON_FOLDER_REPORT = "archive_taxon_folders_report.csv"
