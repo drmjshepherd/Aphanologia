@@ -384,16 +384,30 @@
     </div>
 
     <datalist id="rankOptions">
-        <option value="Kingdom"><option value="Phylum"><option value="Class"><option value="Subclass">
-        <option value="Order"><option value="Suborder"><option value="Hyporder"><option value="Infraorder">
+        <option value="Kingdom"><option value="Phylum"><option value="Subphylum"><option value="Superclass"><option value="Class"><option value="Subclass">
+        <option value="Superorder"><option value="Order"><option value="Suborder"><option value="Infraorder"><option value="Hyporder">
         <option value="Parvorder"><option value="Microrder"><option value="Nanorder"><option value="Superfamily">
         <option value="Family"><option value="Subfamily"><option value="Tribe"><option value="Genus">
-        <option value="Subgenus"><option value="Species"><option value="Subspecies"><option value="Forma">
+        <option value="Species"><option value="Subspecies"><option value="Variety"><option value="Forma">
     </datalist>
 
     <script src="/static/js/literature_widget.js"></script>
     <script>
         let currentUser = null;
+
+		const TAXON_RANKS = [
+			'Kingdom', 'Phylum', 'Subphylum', 'Superclass', 'Class', 'Subclass',
+			'Superorder', 'Order', 'Suborder', 'Infraorder', 'Hyporder', 'Parvorder',
+			'Microrder', 'Nanorder', 'Superfamily', 'Family', 'Subfamily', 'Tribe', 'Genus',
+			'Species', 'Subspecies', 'Variety', 'Forma'
+		];
+
+		function getNextRankDown(rank) {
+			const idx = TAXON_RANKS.findIndex(r => r.toLowerCase() === (rank || '').toLowerCase());
+			if (idx === -1 || idx === TAXON_RANKS.length - 1) return '';
+			return TAXON_RANKS[idx + 1];
+		}
+
 
         const NOMENCLATURAL_STATUS_OPTIONS = [
             "invalid - junior synonym",
@@ -452,18 +466,46 @@
         // open that taxon straight into the edit form - skipping the
         // usual search-then-preview-then-edit steps, since following
         // such a link already signals a specific, deliberate choice.
-        function openTaxonFromUrlIfPresent() {
-            const params = new URLSearchParams(window.location.search);
-            const taxonId = params.get('taxon_id');
-            const newTaxonName = params.get('new_taxon_name');
-            if (taxonId) {
-                loadTaxonForEdit(taxonId);
-            } else if (newTaxonName) {
-                document.getElementById('create-panel').classList.add('visible');
-                document.getElementById('newScientificName').value = newTaxonName;
-                document.getElementById('newScientificName').scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-        }
+		// This has now been updated to prepopulate fields appropriate
+		// for adding child taxa or synonyms, using the buttons in the
+		// taxonomy browser.
+		function openTaxonFromUrlIfPresent() {
+			const params = new URLSearchParams(window.location.search);
+			const taxonId = params.get('taxon_id');
+			const newTaxonName = params.get('new_taxon_name');
+			const mode = params.get('mode');
+
+			if (mode === 'add_child' || mode === 'add_synonym') {
+				openCreatePanelFromActiveTaxon(mode, taxonId, params.get('taxon_name'), params.get('taxon_rank'));
+			} else if (taxonId) {
+				loadTaxonForEdit(taxonId);
+			} else if (newTaxonName) {
+				document.getElementById('create-panel').classList.add('visible');
+				document.getElementById('newScientificName').value = newTaxonName;
+				document.getElementById('newScientificName').scrollIntoView({ behavior: 'smooth', block: 'center' });
+			}
+		}
+
+		function openCreatePanelFromActiveTaxon(mode, activeTaxonId, activeTaxonName, activeTaxonRank) {
+			resetCreateForm();
+			document.getElementById('create-panel').classList.add('visible');
+
+			if (mode === 'add_child') {
+				newParentId = activeTaxonId;
+				updatePickerDisplay('newParentCurrent', activeTaxonName, activeTaxonId, '', clearNewParent);
+				document.getElementById('newRank').value = getNextRankDown(activeTaxonRank);
+				document.getElementById('newTaxonomicStatus').value = 'accepted';
+				document.getElementById('newNomenclaturalStatus').value = '';
+			} else if (mode === 'add_synonym') {
+				newAcceptedId = activeTaxonId;
+				updatePickerDisplay('newAcceptedCurrent', activeTaxonName, activeTaxonId, '', clearNewAccepted);
+				document.getElementById('newRank').value = activeTaxonRank || '';
+				document.getElementById('newTaxonomicStatus').value = 'synonym';
+				document.getElementById('newNomenclaturalStatus').value = '';
+			}
+
+			document.getElementById('newScientificName').scrollIntoView({ behavior: 'smooth', block: 'center' });
+		}
 
         // ---------- generic taxon search-and-pick, reused for the
         // main search box plus the four parent/accepted pickers ----------
