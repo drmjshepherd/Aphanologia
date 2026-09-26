@@ -1,6 +1,6 @@
 import pandas as pd
 
-excel_path = r"C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx"
+excel_path = r"C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx" # <--- Update path to folder containing data upload
 
 pk_map = {
     'Samples': ['eventID'],
