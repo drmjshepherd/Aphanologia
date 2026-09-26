@@ -224,14 +224,11 @@
                                     <option value="Name first published in">Name first published in</option>
                                     <option value="As used in">As used in</option>
                                     <option value="Presence in UK from">Presence in UK from</option>
+                                    <option value="Identification Key">Identification Key</option>
                                 </select>
                             </div>
-                            <div class="field checkbox-field">
-                                <label for="newLitIsIdKey" style="margin:0;">Identification key</label>
-                                <input type="checkbox" id="newLitIsIdKey">
-                            </div>
                             <div class="field" id="newLitKeyScopeField" style="display:none;">
-                                <label for="newLitKeyScope">Key covers rank</label>
+                                <label for="newLitKeyScope">Key covers rank <span class="hint">(optional)</span></label>
                                 <input type="text" id="newLitKeyScope" list="rankOptions">
                             </div>
                         </div>
@@ -344,14 +341,11 @@
                                 <option value="Name first published in">Name first published in</option>
                                 <option value="As used in">As used in</option>
                                 <option value="Presence in UK from">Presence in UK from</option>
+                                <option value="Identification Key">Identification Key</option>
                             </select>
                         </div>
-                        <div class="field checkbox-field">
-                            <label for="litIsIdKey" style="margin:0;">Identification key</label>
-                            <input type="checkbox" id="litIsIdKey">
-                        </div>
                         <div class="field" id="litKeyScopeField" style="display:none;">
-                            <label for="litKeyScope">Key covers rank</label>
+                            <label for="litKeyScope">Key covers rank <span class="hint">(optional)</span></label>
                             <input type="text" id="litKeyScope" list="rankOptions" placeholder="e.g. Family">
                         </div>
                     </div>
@@ -738,8 +732,8 @@
             updatePickerDisplay('newAcceptedCurrent', t.scientific_name, t.taxon_id, '', clearNewAccepted);
         });
 
-        document.getElementById('newLitIsIdKey').addEventListener('change', (e) => {
-            document.getElementById('newLitKeyScopeField').style.display = e.target.checked ? 'flex' : 'none';
+        document.getElementById('newLitType').addEventListener('change', (e) => {
+            document.getElementById('newLitKeyScopeField').style.display = (e.target.value === 'Identification Key') ? 'flex' : 'none';
         });
 
         let newLitSelection = null;
@@ -753,12 +747,12 @@
                 alert("Search for and select a reference first (or add a new one), then click '+ Add to this taxon'.");
                 return;
             }
+            const type = document.getElementById('newLitType').value;
             const link = {
                 litID: newLitSelection.litID,
                 formatted_ref: newLitSelection.formatted_ref,
-                Type: document.getElementById('newLitType').value,
-                is_identification_key: document.getElementById('newLitIsIdKey').checked,
-                key_scope_rank: document.getElementById('newLitKeyScope').value || null,
+                Type: type,
+                key_scope_rank: (type === 'Identification Key') ? (document.getElementById('newLitKeyScope').value || null) : null,
                 online_resource_url: null,
                 access_notes: null
             };
@@ -766,7 +760,6 @@
             renderPendingLiteratureLinks();
             newLitWidgetHandle.clear();
             newLitSelection = null;
-            document.getElementById('newLitIsIdKey').checked = false;
             document.getElementById('newLitKeyScope').value = '';
             document.getElementById('newLitKeyScopeField').style.display = 'none';
         }
@@ -782,10 +775,11 @@
             pendingLiteratureLinks.forEach((link, i) => {
                 const div = document.createElement('div');
                 div.className = 'pending-lit-row';
+                const scopeTag = (link.Type === 'Identification Key' && link.key_scope_rank) ? ` (covers: ${link.key_scope_rank})` : '';
                 div.innerHTML = `
                     <div>
                         <div class="plr-ref">${link.formatted_ref}</div>
-                        <div class="plr-meta">${link.Type}${link.is_identification_key ? ' &middot; identification key' + (link.key_scope_rank ? ' (' + link.key_scope_rank + ')' : '') : ''}</div>
+                        <div class="plr-meta">${link.Type}${scopeTag}</div>
                     </div>
                     <button type="button" class="small secondary" data-idx="${i}">Remove</button>
                 `;
@@ -827,7 +821,7 @@
                 parentNameUsageID: newParentId,
                 acceptedNameUsageID: newAcceptedId,
                 literature_links: pendingLiteratureLinks.map(l => ({
-                    litID: l.litID, Type: l.Type, is_identification_key: l.is_identification_key,
+                    litID: l.litID, Type: l.Type,
                     key_scope_rank: l.key_scope_rank, online_resource_url: l.online_resource_url,
                     access_notes: l.access_notes
                 })),
@@ -911,8 +905,8 @@
             onSelected: (lit) => { selectedLitId = lit ? lit.litID : null; }
         });
 
-        document.getElementById('litIsIdKey').addEventListener('change', (e) => {
-            document.getElementById('litKeyScopeField').style.display = e.target.checked ? 'flex' : 'none';
+        document.getElementById('litType').addEventListener('change', (e) => {
+            document.getElementById('litKeyScopeField').style.display = (e.target.value === 'Identification Key') ? 'flex' : 'none';
         });
 
         async function loadLiteratureLinks(taxonId) {
@@ -929,11 +923,9 @@
                 data.links.forEach(l => {
                     const div = document.createElement('div');
                     div.className = 'history-entry';
-                    const keyTag = l.is_identification_key
-                        ? ` &middot; identification key${l.key_scope_rank ? ' (' + l.key_scope_rank + ')' : ''}`
-                        : '';
+                    const scopeTag = (l.Type === 'Identification Key' && l.key_scope_rank) ? ` (covers: ${l.key_scope_rank})` : '';
                     div.innerHTML = `
-                        <div class="history-meta"><b>${l.Type}</b>${keyTag}</div>
+                        <div class="history-meta"><b>${l.Type}</b>${scopeTag}</div>
                         <div class="history-diff-row">${l.formatted_ref}</div>
                         ${l.access_notes ? `<div class="history-notes">${l.access_notes}</div>` : ''}
                         <button type="button" class="small secondary" style="margin-top:6px;" data-type="${l.Type}" data-lit="${l.litID}">Remove</button>
@@ -954,11 +946,11 @@
                 setSaveStatus('litAddStatus', 'Search for and select a reference first.', 'error');
                 return;
             }
+            const type = document.getElementById('litType').value;
             const payload = {
                 litID: selectedLitId,
-                Type: document.getElementById('litType').value,
-                is_identification_key: document.getElementById('litIsIdKey').checked,
-                key_scope_rank: document.getElementById('litKeyScope').value || null,
+                Type: type,
+                key_scope_rank: (type === 'Identification Key') ? (document.getElementById('litKeyScope').value || null) : null,
                 online_resource_url: document.getElementById('litOnlineUrl').value || null,
                 access_notes: document.getElementById('litAccessNotes').value || null,
                 notes: null
@@ -981,7 +973,6 @@
                 document.getElementById('litKeyScope').value = '';
                 document.getElementById('litAccessNotes').value = '';
                 document.getElementById('litOnlineUrl').value = '';
-                document.getElementById('litIsIdKey').checked = false;
                 document.getElementById('litKeyScopeField').style.display = 'none';
                 loadLiteratureLinks(editingTaxonId);
             } catch (err) {
