@@ -14,7 +14,14 @@
         #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
         #auth-status a { color: white; }
 
-        #page { max-width: 1000px; margin: 0 auto; padding: 24px 20px 80px; }
+        #page { max-width: 1280px; margin: 0 auto; padding: 24px 20px 80px; display: flex; gap: 24px; align-items: flex-start; }
+        #main-column { flex: 1; min-width: 0; }
+        #session-sidebar { width: 300px; flex-shrink: 0; position: sticky; top: 20px; }
+        @media (max-width: 900px) {
+            #page { flex-direction: column; }
+            #session-sidebar { width: 100%; position: static; }
+        }
+
         .gate-message { text-align: center; padding: 60px 20px; color: #495057; }
 
         h2 { color: #1b4332; font-size: 1.1rem; margin: 0 0 4px; }
@@ -38,23 +45,30 @@
         #global-status { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 16px; display: none; }
         #global-status.success { display: block; background: #e9f5ee; color: #1b4332; border: 1px solid #b7e4c7; }
         #global-status.error { display: block; background: #fbebec; color: #842029; border: 1px solid #e5a6ab; }
+        #global-status.info { display: block; background: #eef3fb; color: #1b3a6b; border: 1px solid #a9c2e8; }
 
-        .session-edit-row { border-top: 1px solid #f1f3f5; padding: 8px 0; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        .preview-card { border: 1px solid #b7e4c7; background: #f4faf6; border-radius: 6px; padding: 14px 16px; margin-top: 14px; }
+        .preview-card .preview-name { font-style: italic; color: #1b4332; font-size: 1.05rem; }
+        .preview-card .preview-meta { color: #6c757d; font-size: 0.82rem; margin-top: 2px; }
+
+        .session-edit-row { border-top: 1px solid #f1f3f5; padding: 9px 0; font-size: 0.83rem; }
         .session-edit-row:first-child { border-top: none; }
-        .session-edit-row .se-name { font-style: italic; color: #1b4332; }
-        .session-edit-row .se-fields { color: #6c757d; font-size: 0.78rem; }
-        .session-edit-row .se-time { color: #adb5bd; font-size: 0.76rem; white-space: nowrap; }
+        .session-edit-row .se-name { font-style: italic; color: #1b4332; display: block; }
+        .session-edit-row .se-fields { color: #6c757d; font-size: 0.76rem; }
+        .session-edit-row .se-time { color: #adb5bd; font-size: 0.72rem; }
+        .session-edit-row .se-row-bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+        .no-history { color: #adb5bd; font-size: 0.85rem; font-style: italic; }
 
         input[type=text], input[type=search], select, textarea {
             width: 100%; box-sizing: border-box; padding: 8px 9px; border: 1px solid #ced4da;
-            border-radius: 4px; font-size: 0.9rem; font-family: inherit;
+            border-radius: 4px; font-size: 0.9rem; font-family: inherit; background: white;
         }
         textarea { resize: vertical; min-height: 44px; }
 
         .field-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
         .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
         .field.full { flex-basis: 100%; }
-        .field.checkbox-field { flex-direction: row; align-items: center; gap: 8px; }
+        .field.checkbox-field { flex-direction: row; align-items: center; gap: 8px; flex: 0 0 auto; }
         .field.checkbox-field input[type=checkbox] { width: auto; }
         .field label { font-weight: 600; font-size: 0.78rem; color: #2d6a4f; }
         .field .hint { font-size: 0.74rem; color: #868e96; font-weight: normal; }
@@ -70,14 +84,21 @@
         button.secondary:hover { background: #e9f5ee; }
         button.small { padding: 5px 10px; font-size: 0.78rem; }
 
-        .save-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+        .save-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
         .save-status { font-size: 0.85rem; }
         .save-status.error { color: #842029; }
         .save-status.success { color: #1b4332; font-weight: 600; }
 
-        #create-toggle { margin-bottom: 20px; }
-        #create-panel { display: none; }
+        #create-toggle { margin-bottom: 4px; }
+        #create-panel { display: none; margin-top: 16px; border-top: 1px solid #f1f3f5; padding-top: 16px; }
         #create-panel.visible { display: block; }
+
+        .pending-lit-row {
+            border: 1px solid #dee2e6; border-radius: 6px; padding: 8px 10px; margin-top: 8px;
+            font-size: 0.83rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+        }
+        .pending-lit-row .plr-ref { font-style: italic; color: #1b4332; }
+        .pending-lit-row .plr-meta { color: #6c757d; font-size: 0.76rem; margin-top: 2px; }
 
         .history-entry { border-top: 1px solid #f1f3f5; padding: 10px 0; font-size: 0.83rem; }
         .history-entry:first-child { border-top: none; }
@@ -88,9 +109,7 @@
         .history-diff-row .old-val { color: #c1666b; text-decoration: line-through; }
         .history-diff-row .new-val { color: #1b4332; }
         .history-notes { color: #495057; font-style: italic; margin-top: 4px; }
-        .no-history { color: #adb5bd; font-size: 0.85rem; font-style: italic; }
-
-        .taxonrank-datalist-note { font-size: 0.72rem; color: #868e96; }
+        .cascade-note { background: #fff8e6; border: 1px solid #f0d78c; border-radius: 6px; padding: 8px 10px; font-size: 0.83rem; margin-bottom: 10px; color: #7a5c00; }
     </style>
 </head>
 <body>
@@ -103,235 +122,302 @@
     </div>
 
     <div id="page">
-        <div id="gate" class="gate-message" style="display:none;"></div>
+        <div id="main-column">
+            <div id="gate" class="gate-message" style="display:none;"></div>
 
-        <div id="editor-content" style="display:none;">
-            <h2>Taxonomy Editor</h2>
-            <p class="subtext">Search for a taxon to rename, reparent, mark as a synonym, or edit its details. Every save is logged with who made the change and what changed.</p>
+            <div id="editor-content" style="display:none;">
+                <h2>Taxonomy Editor</h2>
+                <p class="subtext">Search for a taxon to rename, reparent, mark as a synonym, or edit its details. Every save is logged with who made the change and what changed.</p>
 
-            <div id="global-status"></div>
+                <div id="global-status"></div>
 
-            <div class="panel">
-                <div class="field full">
-                    <label for="mainTaxonSearch">Search taxa</label>
-                    <div class="taxon-search-wrapper">
-                        <input type="text" id="mainTaxonSearch" placeholder="e.g. Veigaia or Oribatida" autocomplete="off">
-                        <div id="taxon-search-dropdown" class="taxon-dropdown-box"></div>
+                <div class="panel">
+                    <div class="field full">
+                        <label for="mainTaxonSearch">Search taxa</label>
+                        <div class="taxon-search-wrapper">
+                            <input type="text" id="mainTaxonSearch" placeholder="e.g. Veigaia or Oribatida" autocomplete="off">
+                            <div id="taxon-search-dropdown" class="taxon-dropdown-box"></div>
+                        </div>
+                    </div>
+
+                    <div id="preview-card" class="preview-card" style="display:none;">
+                        <div class="preview-name" id="previewName"></div>
+                        <div class="preview-meta" id="previewMeta"></div>
+                        <div class="save-row">
+                            <button type="button" onclick="confirmEditSelected()">Edit this taxon</button>
+                            <button type="button" class="secondary" onclick="cancelPreview()">Cancel</button>
+                        </div>
+                    </div>
+
+                    <div id="create-toggle">
+                        <button type="button" class="secondary small" onclick="toggleCreatePanel()">+ Add new taxon</button>
+                    </div>
+
+                    <div id="create-panel">
+                        <h2 style="font-size:1rem;">Add new taxon</h2>
+                        <div class="field-row">
+                            <div class="field full">
+                                <label for="newScientificName">Scientific name *</label>
+                                <input type="text" id="newScientificName">
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field">
+                                <label for="newAuthorship">Authorship</label>
+                                <input type="text" id="newAuthorship">
+                            </div>
+                            <div class="field">
+                                <label for="newRank">Rank *</label>
+                                <input type="text" id="newRank" list="rankOptions" placeholder="e.g. Species, Genus, Family">
+                            </div>
+                            <div class="field">
+                                <label for="newTaxonomicStatus">Taxonomic status</label>
+                                <select id="newTaxonomicStatus">
+                                    <option value="accepted">accepted</option>
+                                    <option value="synonym">synonym</option>
+                                    <option value="misapplied">misapplied</option>
+                                    <option value="doubtful">doubtful</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="newNomenclaturalStatus">Nomenclatural status</label>
+                                <select id="newNomenclaturalStatus"></select>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field full">
+                                <label>Placement * &mdash; either a parent (new taxon in the hierarchy) or an accepted name (new synonym)</label>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field">
+                                <label>Parent taxon</label>
+                                <div class="taxon-search-wrapper">
+                                    <input type="text" id="newParentSearch" placeholder="Search for parent..." autocomplete="off">
+                                    <div id="new-parent-dropdown" class="taxon-dropdown-box"></div>
+                                </div>
+                                <div class="picker-current" id="newParentCurrent"><span class="placeholder">Not set</span></div>
+                            </div>
+                            <div class="field">
+                                <label>OR: accepted name (creates a synonym instead)</label>
+                                <div class="taxon-search-wrapper">
+                                    <input type="text" id="newAcceptedSearch" placeholder="Search for accepted taxon..." autocomplete="off">
+                                    <div id="new-accepted-dropdown" class="taxon-dropdown-box"></div>
+                                </div>
+                                <div class="picker-current" id="newAcceptedCurrent"><span class="placeholder">Not set</span></div>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field full">
+                                <label for="newRemarks">Remarks</label>
+                                <textarea id="newRemarks"></textarea>
+                            </div>
+                        </div>
+
+                        <h2 style="font-size:0.95rem; margin-top:6px;">Literature <span class="hint">(almost every new taxon needs at least one reference)</span></h2>
+                        <div id="newLitWidgetContainer"></div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <div class="field">
+                                <label for="newLitType">Relationship type</label>
+                                <select id="newLitType">
+                                    <option value="Taxonomy or synonymy from">Taxonomy or synonymy from</option>
+                                    <option value="Name first published in">Name first published in</option>
+                                    <option value="As used in">As used in</option>
+                                    <option value="Presence in UK from">Presence in UK from</option>
+                                </select>
+                            </div>
+                            <div class="field checkbox-field">
+                                <label for="newLitIsIdKey" style="margin:0;">Identification key</label>
+                                <input type="checkbox" id="newLitIsIdKey">
+                            </div>
+                            <div class="field" id="newLitKeyScopeField" style="display:none;">
+                                <label for="newLitKeyScope">Key covers rank</label>
+                                <input type="text" id="newLitKeyScope" list="rankOptions">
+                            </div>
+                        </div>
+                        <div class="save-row">
+                            <button type="button" class="secondary" onclick="addPendingLiteratureLink()">+ Add to this taxon</button>
+                        </div>
+                        <div id="pendingLitList"></div>
+
+                        <div class="field-row" style="margin-top:14px;">
+                            <div class="field full">
+                                <label for="newNotes">Reason for creating this taxon <span class="hint">(saved to the activity log)</span></label>
+                                <textarea id="newNotes"></textarea>
+                            </div>
+                        </div>
+                        <div class="save-row">
+                            <button type="button" onclick="createTaxon()">Add taxon</button>
+                            <button type="button" class="secondary" onclick="cancelCreateTaxon()">Cancel</button>
+                            <span class="save-status" id="createStatus"></span>
+                        </div>
+                        <p class="subtext" style="margin-top:8px; margin-bottom:0;">After adding, you'll be able to keep editing this taxon and attach more literature if needed.</p>
                     </div>
                 </div>
-                <div id="create-toggle">
-                    <button type="button" class="secondary small" onclick="toggleCreatePanel()">+ Create new taxon</button>
+
+                <div id="edit-panel" class="panel" style="display:none;">
+                    <h2 id="editHeading">Edit taxon</h2>
+                    <p class="subtext" id="editSubheading"></p>
+
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="editScientificName">Scientific name *</label>
+                            <input type="text" id="editScientificName">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="editAuthorship">Authorship</label>
+                            <input type="text" id="editAuthorship">
+                        </div>
+                        <div class="field">
+                            <label for="editRank">Rank *</label>
+                            <input type="text" id="editRank" list="rankOptions">
+                        </div>
+                        <div class="field">
+                            <label for="editTaxonomicStatus">Taxonomic status</label>
+                            <select id="editTaxonomicStatus">
+                                <option value="accepted">accepted</option>
+                                <option value="synonym">synonym</option>
+                                <option value="misapplied">misapplied</option>
+                                <option value="doubtful">doubtful</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="editNomenclaturalStatus">Nomenclatural status</label>
+                            <select id="editNomenclaturalStatus"></select>
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field">
+                            <label>Parent taxon <span class="hint">(reparent within the hierarchy)</span></label>
+                            <div class="taxon-search-wrapper">
+                                <input type="text" id="editParentSearch" placeholder="Search to change parent..." autocomplete="off">
+                                <div id="edit-parent-dropdown" class="taxon-dropdown-box"></div>
+                            </div>
+                            <div class="picker-current" id="editParentCurrent"><span class="placeholder">None (top-level taxon)</span></div>
+                        </div>
+                        <div class="field">
+                            <label>Accepted name <span class="hint">(set this to mark as a synonym)</span></label>
+                            <div class="taxon-search-wrapper">
+                                <input type="text" id="editAcceptedSearch" placeholder="Search to mark as synonym of..." autocomplete="off">
+                                <div id="edit-accepted-dropdown" class="taxon-dropdown-box"></div>
+                            </div>
+                            <div class="picker-current" id="editAcceptedCurrent"><span class="placeholder">Not a synonym</span></div>
+                            <p class="hint" style="margin:2px 0 0;">If this taxon has synonym children, they'll be automatically re-pointed to the new accepted name. Valid (non-synonym) children like subspecies must be reparented first.</p>
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="editRemarks">Remarks</label>
+                            <textarea id="editRemarks"></textarea>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field full">
+                            <label for="editNotes">Reason for this edit <span class="hint">(saved to the activity log, not shown on the taxon itself)</span></label>
+                            <textarea id="editNotes" placeholder="e.g. Fixing 'senus' typo per data-issue list"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="save-row">
+                        <button type="button" onclick="saveTaxonEdit()">Save changes</button>
+                        <button type="button" class="secondary" onclick="returnToSearchView()">Cancel</button>
+                        <span class="save-status" id="editSaveMsg"></span>
+                    </div>
                 </div>
 
-                <div id="create-panel">
-                    <h2 style="font-size:1rem;">New taxon</h2>
-                    <div class="field-row">
-                        <div class="field full">
-                            <label for="newScientificName">Scientific name *</label>
-                            <input type="text" id="newScientificName">
+                <div id="literature-panel" class="panel" style="display:none;">
+                    <h2 style="font-size:1rem;">Linked literature</h2>
+                    <p class="subtext">References this taxon's name, synonymy, or UK presence is based on, or identification keys that cover it.</p>
+                    <div id="literatureLinksList"></div>
+
+                    <h2 style="font-size:0.95rem; margin-top:18px;">Add a reference</h2>
+                    <div id="editLitWidgetContainer"></div>
+                    <div class="field-row" style="margin-top:8px;">
+                        <div class="field">
+                            <label for="litType">Relationship type *</label>
+                            <select id="litType">
+                                <option value="Taxonomy or synonymy from">Taxonomy or synonymy from</option>
+                                <option value="Name first published in">Name first published in</option>
+                                <option value="As used in">As used in</option>
+                                <option value="Presence in UK from">Presence in UK from</option>
+                            </select>
+                        </div>
+                        <div class="field checkbox-field">
+                            <label for="litIsIdKey" style="margin:0;">Identification key</label>
+                            <input type="checkbox" id="litIsIdKey">
+                        </div>
+                        <div class="field" id="litKeyScopeField" style="display:none;">
+                            <label for="litKeyScope">Key covers rank</label>
+                            <input type="text" id="litKeyScope" list="rankOptions" placeholder="e.g. Family">
                         </div>
                     </div>
                     <div class="field-row">
                         <div class="field">
-                            <label for="newAuthorship">Authorship</label>
-                            <input type="text" id="newAuthorship">
+                            <label for="litAccessNotes">Access notes</label>
+                            <input type="text" id="litAccessNotes" placeholder="e.g. Behind paywall, library copy only">
                         </div>
                         <div class="field">
-                            <label for="newRank">Rank *</label>
-                            <input type="text" id="newRank" list="rankOptions" placeholder="e.g. Species, Genus, Family">
-                        </div>
-                        <div class="field">
-                            <label for="newStatus">Taxonomic status</label>
-                            <input type="text" id="newStatus" list="statusOptions" value="accepted">
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field full">
-                            <label>Placement * &mdash; either a parent (new taxon in the hierarchy) or an accepted name (new synonym)</label>
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field">
-                            <label>Parent taxon</label>
-                            <div class="taxon-search-wrapper">
-                                <input type="text" id="newParentSearch" placeholder="Search for parent..." autocomplete="off">
-                                <div id="new-parent-dropdown" class="taxon-dropdown-box"></div>
-                            </div>
-                            <div class="picker-current" id="newParentCurrent"><span class="placeholder">Not set</span></div>
-                        </div>
-                        <div class="field">
-                            <label>OR: accepted name (creates a synonym instead)</label>
-                            <div class="taxon-search-wrapper">
-                                <input type="text" id="newAcceptedSearch" placeholder="Search for accepted taxon..." autocomplete="off">
-                                <div id="new-accepted-dropdown" class="taxon-dropdown-box"></div>
-                            </div>
-                            <div class="picker-current" id="newAcceptedCurrent"><span class="placeholder">Not set</span></div>
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field full">
-                            <label for="newRemarks">Remarks</label>
-                            <textarea id="newRemarks"></textarea>
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field full">
-                            <label for="newNotes">Reason for creating this taxon <span class="hint">(saved to the activity log)</span></label>
-                            <textarea id="newNotes"></textarea>
+                            <label for="litOnlineUrl">Online resource URL <span class="hint">(if different from the reference's own URL)</span></label>
+                            <input type="text" id="litOnlineUrl">
                         </div>
                     </div>
                     <div class="save-row">
-                        <button type="button" onclick="createTaxon()">Create taxon</button>
-                        <span class="save-status" id="createStatus"></span>
+                        <button type="button" class="secondary" onclick="addLiteratureLink()">Add link</button>
+                        <span class="save-status" id="litAddStatus"></span>
                     </div>
                 </div>
-            </div>
 
+                <div id="history-panel" class="panel" style="display:none;">
+                    <h2 style="font-size:1rem;">Edit history</h2>
+                    <div id="historyList"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="session-sidebar">
             <div id="session-edits-panel" class="panel" style="display:none;">
                 <h2 style="font-size:1rem;">Edits made this session</h2>
                 <div id="sessionEditsList"></div>
-            </div>
-
-            <div id="edit-panel" class="panel" style="display:none;">
-                <h2 id="editHeading">Edit taxon</h2>
-                <p class="subtext" id="editSubheading"></p>
-
-                <div class="field-row">
-                    <div class="field full">
-                        <label for="editScientificName">Scientific name *</label>
-                        <input type="text" id="editScientificName">
-                    </div>
-                </div>
-                <div class="field-row">
-                    <div class="field">
-                        <label for="editAuthorship">Authorship</label>
-                        <input type="text" id="editAuthorship">
-                    </div>
-                    <div class="field">
-                        <label for="editRank">Rank *</label>
-                        <input type="text" id="editRank" list="rankOptions">
-                    </div>
-                    <div class="field">
-                        <label for="editStatus">Taxonomic status</label>
-                        <input type="text" id="editStatus" list="statusOptions">
-                    </div>
-                </div>
-                <div class="field-row">
-                    <div class="field">
-                        <label for="editNomenclaturalStatus">Nomenclatural status</label>
-                        <input type="text" id="editNomenclaturalStatus">
-                    </div>
-                </div>
-
-                <div class="field-row">
-                    <div class="field">
-                        <label>Parent taxon <span class="hint">(reparent within the hierarchy)</span></label>
-                        <div class="taxon-search-wrapper">
-                            <input type="text" id="editParentSearch" placeholder="Search to change parent..." autocomplete="off">
-                            <div id="edit-parent-dropdown" class="taxon-dropdown-box"></div>
-                        </div>
-                        <div class="picker-current" id="editParentCurrent"><span class="placeholder">None (top-level taxon)</span></div>
-                    </div>
-                    <div class="field">
-                        <label>Accepted name <span class="hint">(set this to mark as a synonym)</span></label>
-                        <div class="taxon-search-wrapper">
-                            <input type="text" id="editAcceptedSearch" placeholder="Search to mark as synonym of..." autocomplete="off">
-                            <div id="edit-accepted-dropdown" class="taxon-dropdown-box"></div>
-                        </div>
-                        <div class="picker-current" id="editAcceptedCurrent"><span class="placeholder">Not a synonym</span></div>
-                    </div>
-                </div>
-
-                <div class="field-row">
-                    <div class="field full">
-                        <label for="editRemarks">Remarks</label>
-                        <textarea id="editRemarks"></textarea>
-                    </div>
-                </div>
-                <div class="field-row">
-                    <div class="field full">
-                        <label for="editNotes">Reason for this edit <span class="hint">(saved to the activity log, not shown on the taxon itself)</span></label>
-                        <textarea id="editNotes" placeholder="e.g. Fixing 'senus' typo per data-issue list"></textarea>
-                    </div>
-                </div>
-
-                <div class="save-row">
-                    <button type="button" onclick="saveTaxonEdit()">Save changes</button>
-                    <button type="button" class="secondary" onclick="returnToSearchView()">Cancel</button>
-                    <span class="save-status" id="editStatus"></span>
-                </div>
-            </div>
-
-            <div id="literature-panel" class="panel" style="display:none;">
-                <h2 style="font-size:1rem;">Linked literature</h2>
-                <p class="subtext">References this taxon's name, synonymy, or UK presence is based on, or identification keys that cover it.</p>
-                <div id="literatureLinksList"></div>
-
-                <h2 style="font-size:0.95rem; margin-top:18px;">Add a reference</h2>
-                <div class="field-row">
-                    <div class="field full">
-                        <label for="litSearchInput">Search literature</label>
-                        <div class="taxon-search-wrapper">
-                            <input type="text" id="litSearchInput" placeholder="Search author, title, year..." autocomplete="off">
-                            <div id="lit-search-dropdown" class="taxon-dropdown-box"></div>
-                        </div>
-                        <div class="picker-current" id="litSelectedCurrent"><span class="placeholder">No reference selected</span></div>
-                    </div>
-                </div>
-                <div class="field-row">
-                    <div class="field">
-                        <label for="litType">Relationship type *</label>
-                        <select id="litType">
-                            <option value="Taxonomy or synonymy from">Taxonomy or synonymy from</option>
-                            <option value="Name first published in">Name first published in</option>
-                            <option value="As used in">As used in</option>
-                            <option value="Presence in UK from">Presence in UK from</option>
-                        </select>
-                    </div>
-                    <div class="field checkbox-field">
-                        <label for="litIsIdKey" style="margin:0;">Identification key</label>
-                        <input type="checkbox" id="litIsIdKey">
-                    </div>
-                    <div class="field" id="litKeyScopeField" style="display:none;">
-                        <label for="litKeyScope">Key covers rank</label>
-                        <input type="text" id="litKeyScope" list="rankOptions" placeholder="e.g. Family">
-                    </div>
-                </div>
-                <div class="field-row">
-                    <div class="field">
-                        <label for="litAccessNotes">Access notes</label>
-                        <input type="text" id="litAccessNotes" placeholder="e.g. Behind paywall, library copy only">
-                    </div>
-                    <div class="field">
-                        <label for="litOnlineUrl">Online resource URL <span class="hint">(if different from the reference's own URL)</span></label>
-                        <input type="text" id="litOnlineUrl">
-                    </div>
-                </div>
-                <div class="save-row">
-                    <button type="button" class="secondary" onclick="addLiteratureLink()">Add link</button>
-                    <span class="save-status" id="litAddStatus"></span>
-                </div>
-            </div>
-
-            <div id="history-panel" class="panel" style="display:none;">
-                <h2 style="font-size:1rem;">Edit history</h2>
-                <div id="historyList"></div>
             </div>
         </div>
     </div>
 
     <datalist id="rankOptions">
         <option value="Kingdom"><option value="Phylum"><option value="Class"><option value="Subclass">
-        <option value="Order"><option value="Suborder"><option value="Infraorder"><option value="Superfamily">
+        <option value="Order"><option value="Suborder"><option value="Hyporder"><option value="Infraorder">
+        <option value="Parvorder"><option value="Microrder"><option value="Nanorder"><option value="Superfamily">
         <option value="Family"><option value="Subfamily"><option value="Tribe"><option value="Genus">
         <option value="Subgenus"><option value="Species"><option value="Subspecies"><option value="Forma">
     </datalist>
-    <datalist id="statusOptions">
-        <option value="accepted"><option value="synonym"><option value="doubtful"><option value="misapplied">
-    </datalist>
 
+    <script src="/static/js/literature_widget.js"></script>
     <script>
         let currentUser = null;
+
+        const NOMENCLATURAL_STATUS_OPTIONS = [
+            "invalid - junior synonym",
+            "invalid - literature misspelling",
+            "invalid - misspelled or invalid basionym",
+            "invalid - misspelled or invalid junior synonym",
+            "invalid - subsequent combination of basionym",
+            "invalid - subsequent combination of junior synonym",
+            "invalid - superseded basionym",
+            "nomen dubium",
+            "nomen nudum",
+            "species inquirenda",
+            "valid name with subgenus"
+        ];
+
+        function populateNomenclaturalStatusSelect(selectEl) {
+            selectEl.innerHTML = '<option value="">(none)</option>' +
+                NOMENCLATURAL_STATUS_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+        }
+        populateNomenclaturalStatusSelect(document.getElementById('editNomenclaturalStatus'));
+        populateNomenclaturalStatusSelect(document.getElementById('newNomenclaturalStatus'));
 
         fetch('/api/v1/auth/me')
             .then(r => r.json())
@@ -408,11 +494,6 @@
                 }, 300);
             });
 
-            // Close the dropdown on any click outside the input and the
-            // dropdown itself - scoped to just this picker's own two
-            // elements, not a shared CSS class, so one picker's dropdown
-            // can never be closed (or left open) by clicks meant for
-            // another picker elsewhere on the page.
             document.addEventListener('click', (e) => {
                 if (!input.contains(e.target) && !dropdown.contains(e.target)) {
                     dropdown.classList.remove('visible');
@@ -420,8 +501,30 @@
             });
         }
 
-        // ---------- main search: loads a taxon into the edit panel ----------
-        wireTaxonPicker('mainTaxonSearch', 'taxon-search-dropdown', (t) => loadTaxonForEdit(t.taxon_id));
+        // ---------- main search: shows a preview card, doesn't open the edit form yet ----------
+        let previewTaxonId = null;
+        wireTaxonPicker('mainTaxonSearch', 'taxon-search-dropdown', (t) => showPreview(t));
+
+        function showPreview(t) {
+            document.getElementById('create-panel').classList.remove('visible');
+            previewTaxonId = t.taxon_id;
+            document.getElementById('previewName').textContent = t.scientific_name;
+            document.getElementById('previewMeta').textContent =
+                [t.taxon_rank, t.taxonomic_status, t.taxon_id].filter(Boolean).join(' \u00b7 ');
+            document.getElementById('preview-card').style.display = 'block';
+        }
+
+        function confirmEditSelected() {
+            if (!previewTaxonId) return;
+            document.getElementById('preview-card').style.display = 'none';
+            loadTaxonForEdit(previewTaxonId);
+        }
+
+        function cancelPreview() {
+            previewTaxonId = null;
+            document.getElementById('preview-card').style.display = 'none';
+            document.getElementById('mainTaxonSearch').value = '';
+        }
 
         let editingTaxonId = null;
         let editParentId = null;
@@ -436,12 +539,16 @@
             editParentId = t.parentNameUsageID || null;
             editAcceptedId = t.acceptedNameUsageID || null;
 
+            document.getElementById('preview-card').style.display = 'none';
+            document.getElementById('create-panel').classList.remove('visible');
+            document.getElementById('mainTaxonSearch').value = '';
+
             document.getElementById('editHeading').textContent = `Editing: ${t.scientificName}`;
             document.getElementById('editSubheading').textContent = `taxonID: ${t.taxonID}`;
             document.getElementById('editScientificName').value = t.scientificName || '';
             document.getElementById('editAuthorship').value = t.scientificnameAuthorship || '';
             document.getElementById('editRank').value = t.taxonrank || '';
-            document.getElementById('editStatus').value = t.taxonomicStatus || '';
+            document.getElementById('editTaxonomicStatus').value = t.taxonomicStatus || 'accepted';
             document.getElementById('editNomenclaturalStatus').value = t.nomenclaturalStatus || '';
             document.getElementById('editRemarks').value = t.taxonRemarks || '';
             document.getElementById('editNotes').value = '';
@@ -453,10 +560,11 @@
 
             document.getElementById('edit-panel').style.display = 'block';
             document.getElementById('literature-panel').style.display = 'block';
-            setSaveStatus('editStatus', '', '');
+            setSaveStatus('editSaveMsg', '', '');
             loadHistory(t.taxonID);
             loadLiteratureLinks(t.taxonID);
-            clearLitSelection();
+            if (editLitWidgetHandle) editLitWidgetHandle.clear();
+            selectedLitId = null;
         }
 
         function updatePickerDisplay(elId, label, id, placeholder, clearFn) {
@@ -525,8 +633,9 @@
                 row.className = 'session-edit-row';
                 const fieldsText = e.changedFields.length ? e.changedFields.join(', ') : e.actionType;
                 row.innerHTML = `
-                    <div><span class="se-name">${e.scientificName}</span> <span class="se-fields">(${e.taxonID}) &middot; ${fieldsText}</span></div>
-                    <div style="display:flex; align-items:center; gap:10px;">
+                    <span class="se-name">${e.scientificName}</span>
+                    <span class="se-fields">(${e.taxonID}) &middot; ${fieldsText}</span>
+                    <div class="se-row-bottom">
                         <span class="se-time">${e.when.toLocaleTimeString()}</span>
                         <button type="button" class="small secondary" onclick="loadTaxonForEdit('${e.taxonID}')">Reopen</button>
                     </div>
@@ -536,21 +645,24 @@
         }
 
         async function saveTaxonEdit() {
-            if (!editingTaxonId) return;
+            if (!editingTaxonId) {
+                setSaveStatus('editSaveMsg', 'No taxon is currently loaded - search for one above first.', 'error');
+                return;
+            }
             const taxonID = editingTaxonId;
             const scientificName = document.getElementById('editScientificName').value;
             const payload = {
                 scientificName: scientificName,
                 scientificnameAuthorship: document.getElementById('editAuthorship').value,
                 taxonrank: document.getElementById('editRank').value,
-                taxonomicStatus: document.getElementById('editStatus').value,
+                taxonomicStatus: document.getElementById('editTaxonomicStatus').value,
                 nomenclaturalStatus: document.getElementById('editNomenclaturalStatus').value,
                 taxonRemarks: document.getElementById('editRemarks').value,
                 parentNameUsageID: editParentId,
                 acceptedNameUsageID: editAcceptedId,
                 notes: document.getElementById('editNotes').value
             };
-            setSaveStatus('editStatus', 'Saving...', '');
+            setSaveStatus('editSaveMsg', 'Saving...', '');
             try {
                 const res = await fetch(`/api/v1/admin/taxonomy/${encodeURIComponent(taxonID)}`, {
                     method: 'PUT',
@@ -559,28 +671,36 @@
                 });
                 const data = await res.json();
                 if (!res.ok) {
-                    setSaveStatus('editStatus', data.detail || 'Save failed.', 'error');
+                    setSaveStatus('editSaveMsg', data.detail || 'Save failed.', 'error');
                     return;
                 }
                 if (data.changed_fields.length === 0) {
-                    setSaveStatus('editStatus', 'No changes to save.', '');
+                    setSaveStatus('editSaveMsg', 'No changes to save.', '');
                     return;
                 }
                 recordSessionEdit(taxonID, scientificName, data.changed_fields, 'taxonomy_edit');
-                setGlobalStatus(`Saved changes to ${scientificName} (${data.changed_fields.join(', ')}).`, 'success');
+                let msg = `Saved changes to ${scientificName} (${data.changed_fields.join(', ')}).`;
+                if (data.cascaded_synonym_children && data.cascaded_synonym_children.length > 0) {
+                    const names = data.cascaded_synonym_children.map(c => c.scientificName).join(', ');
+                    msg += ` Also re-pointed ${data.cascaded_synonym_children.length} synonym child(ren) to the new accepted name: ${names}.`;
+                }
+                setGlobalStatus(msg, 'success');
                 returnToSearchView();
             } catch (err) {
-                setSaveStatus('editStatus', 'Save failed: ' + err, 'error');
+                setSaveStatus('editSaveMsg', 'Save failed: ' + err, 'error');
             }
         }
 
-        // ---------- create new taxon ----------
+        // ---------- add new taxon ----------
         function toggleCreatePanel() {
+            document.getElementById('preview-card').style.display = 'none';
+            previewTaxonId = null;
             document.getElementById('create-panel').classList.toggle('visible');
         }
 
         let newParentId = null;
         let newAcceptedId = null;
+        let pendingLiteratureLinks = [];
 
         function clearNewParent() {
             newParentId = null;
@@ -604,19 +724,102 @@
             updatePickerDisplay('newAcceptedCurrent', t.scientific_name, t.taxon_id, '', clearNewAccepted);
         });
 
+        document.getElementById('newLitIsIdKey').addEventListener('change', (e) => {
+            document.getElementById('newLitKeyScopeField').style.display = e.target.checked ? 'flex' : 'none';
+        });
+
+        let newLitSelection = null;
+        const newLitWidgetHandle = LiteratureWidget.mount(document.getElementById('newLitWidgetContainer'), {
+            placeholder: 'Search author, title, year...',
+            onSelected: (lit) => { newLitSelection = lit; }
+        });
+
+        function addPendingLiteratureLink() {
+            if (!newLitSelection) {
+                alert("Search for and select a reference first (or add a new one), then click '+ Add to this taxon'.");
+                return;
+            }
+            const link = {
+                litID: newLitSelection.litID,
+                formatted_ref: newLitSelection.formatted_ref,
+                Type: document.getElementById('newLitType').value,
+                is_identification_key: document.getElementById('newLitIsIdKey').checked,
+                key_scope_rank: document.getElementById('newLitKeyScope').value || null,
+                online_resource_url: null,
+                access_notes: null
+            };
+            pendingLiteratureLinks.push(link);
+            renderPendingLiteratureLinks();
+            newLitWidgetHandle.clear();
+            newLitSelection = null;
+            document.getElementById('newLitIsIdKey').checked = false;
+            document.getElementById('newLitKeyScope').value = '';
+            document.getElementById('newLitKeyScopeField').style.display = 'none';
+        }
+
+        function removePendingLiteratureLink(index) {
+            pendingLiteratureLinks.splice(index, 1);
+            renderPendingLiteratureLinks();
+        }
+
+        function renderPendingLiteratureLinks() {
+            const container = document.getElementById('pendingLitList');
+            container.innerHTML = '';
+            pendingLiteratureLinks.forEach((link, i) => {
+                const div = document.createElement('div');
+                div.className = 'pending-lit-row';
+                div.innerHTML = `
+                    <div>
+                        <div class="plr-ref">${link.formatted_ref}</div>
+                        <div class="plr-meta">${link.Type}${link.is_identification_key ? ' &middot; identification key' + (link.key_scope_rank ? ' (' + link.key_scope_rank + ')' : '') : ''}</div>
+                    </div>
+                    <button type="button" class="small secondary" data-idx="${i}">Remove</button>
+                `;
+                div.querySelector('button').addEventListener('click', () => removePendingLiteratureLink(i));
+                container.appendChild(div);
+            });
+        }
+
+        function resetCreateForm() {
+            document.getElementById('newScientificName').value = '';
+            document.getElementById('newAuthorship').value = '';
+            document.getElementById('newRank').value = '';
+            document.getElementById('newTaxonomicStatus').value = 'accepted';
+            document.getElementById('newNomenclaturalStatus').value = '';
+            document.getElementById('newRemarks').value = '';
+            document.getElementById('newNotes').value = '';
+            clearNewParent();
+            clearNewAccepted();
+            pendingLiteratureLinks = [];
+            renderPendingLiteratureLinks();
+            newLitWidgetHandle.clear();
+            setSaveStatus('createStatus', '', '');
+        }
+
+        function cancelCreateTaxon() {
+            resetCreateForm();
+            document.getElementById('create-panel').classList.remove('visible');
+        }
+
         async function createTaxon() {
             const scientificName = document.getElementById('newScientificName').value;
             const payload = {
                 scientificName: scientificName,
                 scientificnameAuthorship: document.getElementById('newAuthorship').value,
                 taxonrank: document.getElementById('newRank').value,
-                taxonomicStatus: document.getElementById('newStatus').value,
+                taxonomicStatus: document.getElementById('newTaxonomicStatus').value,
+                nomenclaturalStatus: document.getElementById('newNomenclaturalStatus').value,
                 taxonRemarks: document.getElementById('newRemarks').value,
                 parentNameUsageID: newParentId,
                 acceptedNameUsageID: newAcceptedId,
+                literature_links: pendingLiteratureLinks.map(l => ({
+                    litID: l.litID, Type: l.Type, is_identification_key: l.is_identification_key,
+                    key_scope_rank: l.key_scope_rank, online_resource_url: l.online_resource_url,
+                    access_notes: l.access_notes
+                })),
                 notes: document.getElementById('newNotes').value
             };
-            setSaveStatus('createStatus', 'Creating...', '');
+            setSaveStatus('createStatus', 'Adding...', '');
             try {
                 const res = await fetch('/api/v1/admin/taxonomy', {
                     method: 'POST',
@@ -625,30 +828,28 @@
                 });
                 const data = await res.json();
                 if (!res.ok) {
-                    setSaveStatus('createStatus', data.detail || 'Could not create taxon.', 'error');
+                    setSaveStatus('createStatus', data.detail || 'Could not add taxon.', 'error');
                     return;
                 }
                 setSaveStatus('createStatus', '', '');
                 recordSessionEdit(data.taxonID, scientificName, [], 'taxonomy_create');
-                setGlobalStatus(`Created ${scientificName} (${data.taxonID}).`, 'success');
-                // Reset the create form and collapse it, then jump straight
-                // into editing the new taxon (e.g. to attach literature).
-                document.getElementById('newScientificName').value = '';
-                document.getElementById('newAuthorship').value = '';
-                document.getElementById('newRank').value = '';
-                document.getElementById('newStatus').value = 'accepted';
-                document.getElementById('newRemarks').value = '';
-                document.getElementById('newNotes').value = '';
-                clearNewParent();
-                clearNewAccepted();
+                let msg = `Added ${scientificName} (${data.taxonID}).`;
+                if (data.linked_literature && data.linked_literature.length > 0) {
+                    msg += ` Linked ${data.linked_literature.length} reference(s).`;
+                }
+                setGlobalStatus(msg, 'success');
+
+                resetCreateForm();
                 document.getElementById('create-panel').classList.remove('visible');
+
+                // Jump straight into editing the new taxon (e.g. to attach more literature).
                 loadTaxonForEdit(data.taxonID);
             } catch (err) {
                 setSaveStatus('createStatus', 'Failed: ' + err, 'error');
             }
         }
 
-        // ---------- activity/edit history ----------
+        // ---------- edit history ----------
         async function loadHistory(taxonId) {
             const panel = document.getElementById('history-panel');
             const list = document.getElementById('historyList');
@@ -669,7 +870,12 @@
                     let diffHtml = '';
                     if (e.field_changes) {
                         for (const [field, change] of Object.entries(e.field_changes)) {
-                            diffHtml += `<div class="history-diff-row"><span class="field-name">${field}:</span> <span class="old-val">${change.old ?? '(blank)'}</span> &rarr; <span class="new-val">${change.new ?? '(blank)'}</span></div>`;
+                            if (field === 'cascaded_synonym_children') {
+                                const names = change.map(c => c.scientificName).join(', ');
+                                diffHtml += `<div class="cascade-note">Cascaded to new accepted name: ${names}</div>`;
+                            } else {
+                                diffHtml += `<div class="history-diff-row"><span class="field-name">${field}:</span> <span class="old-val">${change.old ?? '(blank)'}</span> &rarr; <span class="new-val">${change.new ?? '(blank)'}</span></div>`;
+                            }
                         }
                     }
                     div.innerHTML = `
@@ -684,67 +890,12 @@
             }
         }
 
-        // ---------- literature linking ----------
+        // ---------- literature linking (edit panel: immediate add to an existing taxon) ----------
         let selectedLitId = null;
-
-        (function wireLiteraturePicker() {
-            const input = document.getElementById('litSearchInput');
-            const dropdown = document.getElementById('lit-search-dropdown');
-            let timer = null;
-            let suppressNextSearch = false;
-
-            input.addEventListener('input', () => {
-                if (suppressNextSearch) { suppressNextSearch = false; return; }
-                clearTimeout(timer);
-                const q = input.value.trim();
-                if (q.length < 2) {
-                    dropdown.classList.remove('visible');
-                    dropdown.innerHTML = '';
-                    return;
-                }
-                timer = setTimeout(async () => {
-                    try {
-                        const res = await fetch(`/api/v1/literature/search?q=${encodeURIComponent(q)}&limit=15`);
-                        const data = await res.json();
-                        dropdown.innerHTML = '';
-                        if (data.results.length === 0) {
-                            dropdown.innerHTML = '<div class="taxon-result-row">No matches</div>';
-                        } else {
-                            data.results.forEach(r => {
-                                const row = document.createElement('div');
-                                row.className = 'taxon-result-row';
-                                row.textContent = r.formatted_ref;
-                                row.addEventListener('click', () => {
-                                    selectedLitId = r.lit_id;
-                                    dropdown.classList.remove('visible');
-                                    dropdown.innerHTML = '';
-                                    suppressNextSearch = true;
-                                    input.value = r.formatted_ref;
-                                    document.getElementById('litSelectedCurrent').innerHTML =
-                                        `Selected: <i>${r.formatted_ref}</i> <button type="button" class="clear" onclick="clearLitSelection()">clear</button>`;
-                                });
-                                dropdown.appendChild(row);
-                            });
-                        }
-                        dropdown.classList.add('visible');
-                    } catch (err) {
-                        dropdown.classList.remove('visible');
-                    }
-                }, 300);
-            });
-
-            document.addEventListener('click', (e) => {
-                if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-                    dropdown.classList.remove('visible');
-                }
-            });
-        })();
-
-        function clearLitSelection() {
-            selectedLitId = null;
-            document.getElementById('litSearchInput').value = '';
-            document.getElementById('litSelectedCurrent').innerHTML = '<span class="placeholder">No reference selected</span>';
-        }
+        const editLitWidgetHandle = LiteratureWidget.mount(document.getElementById('editLitWidgetContainer'), {
+            placeholder: 'Search author, title, year...',
+            onSelected: (lit) => { selectedLitId = lit ? lit.litID : null; }
+        });
 
         document.getElementById('litIsIdKey').addEventListener('change', (e) => {
             document.getElementById('litKeyScopeField').style.display = e.target.checked ? 'flex' : 'none';
@@ -811,7 +962,8 @@
                     return;
                 }
                 setSaveStatus('litAddStatus', 'Added.', 'success');
-                clearLitSelection();
+                editLitWidgetHandle.clear();
+                selectedLitId = null;
                 document.getElementById('litKeyScope').value = '';
                 document.getElementById('litAccessNotes').value = '';
                 document.getElementById('litOnlineUrl').value = '';
