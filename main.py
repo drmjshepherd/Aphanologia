@@ -643,6 +643,7 @@ def get_observations_geojson(
     limit: int = Query(5000, description="Maximum number of spatial points to return", ge=1, le=50000),
     taxon_id: Optional[str] = Query(None, description="Filter records to this taxon and everything beneath it (families, genera, species, synonyms, etc.)"),
     taxon_name: Optional[str] = Query(None, description="[Legacy] Filter records by plain text match on scientific name. Prefer taxon_id where possible."),
+    exact_taxon_id: Optional[str] = Query(None, description="Filter records to exactly this taxonID as originally recorded, bypassing accepted-name/descendant resolution - used to isolate records entered under one specific synonym or misapplied name."),
     start_year: Optional[int] = Query(None, description="Filter records from this year onward"),
     end_year: Optional[int] = Query(None, description="Filter records up to this year")
 ):
@@ -683,7 +684,10 @@ def get_observations_geojson(
         """
         params = []
 
-        if taxon_id and taxon_id.strip():
+        if exact_taxon_id and exact_taxon_id.strip():
+            sql += ' AND veo.raw_effective_taxon_id = %s'
+            params.append(exact_taxon_id.strip())
+        elif taxon_id and taxon_id.strip():
             sql += """ AND veo.resolved_taxon_id IN (
                 SELECT taxon_id FROM get_descendant_taxon_ids(%s)
             )"""
