@@ -40,6 +40,7 @@
         .taxon-result-row:hover { background: #e9ecef; }
         .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
         .taxon-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
+        .taxon-result-row .authorship-tag { font-size: 0.78rem; color: #495057; margin-left: 6px; }
         .taxon-result-row .status-tag { font-size: 0.72rem; color: #b08d1f; margin-left: 6px; }
 
         #global-status { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-bottom: 16px; display: none; }
@@ -492,12 +493,12 @@
                             data.results.forEach(t => {
                                 const row = document.createElement('div');
                                 row.className = 'taxon-result-row';
-                                row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank || ''}</span><span class="status-tag">${t.taxonomic_status || ''}</span>`;
+                                row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="authorship-tag">${t.authorship || ''}</span><span class="rank-tag">${t.taxon_rank || ''}</span><span class="status-tag">${t.taxonomic_status || ''}</span>`;
                                 row.addEventListener('click', () => {
                                     dropdown.classList.remove('visible');
                                     dropdown.innerHTML = '';
                                     suppressNextSearch = true;
-                                    input.value = t.scientific_name;
+                                    input.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
                                     onPick(t);
                                 });
                                 dropdown.appendChild(row);
@@ -524,7 +525,7 @@
         function showPreview(t) {
             document.getElementById('create-panel').classList.remove('visible');
             previewTaxonId = t.taxon_id;
-            document.getElementById('previewName').textContent = t.scientific_name;
+            document.getElementById('previewName').textContent = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
             document.getElementById('previewMeta').textContent =
                 [t.taxon_rank, t.taxonomic_status, t.taxon_id].filter(Boolean).join(' \u00b7 ');
             document.getElementById('preview-card').style.display = 'block';
