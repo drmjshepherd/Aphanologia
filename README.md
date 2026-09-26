@@ -769,6 +769,9 @@ Thanks.  I think we'll not bother with the application of a key across many nest
 
 Literature browsing/management. New /literature page, plus backend: GET /api/v1/literature (paginated browse+search), GET /api/v1/literature/{lit_id} (full detail, usage counts, linked taxa), PUT/DELETE /api/v1/literature/{lit_id} (superuser-only). Delete is blocked with a clear message if the reference is still cited by any observation, sample, or taxon — no silent orphaning. "Assign to taxa" reuses your existing taxon-literature-link endpoints from the taxonomy editor. One assumption I made: the brief only mentioned browse/upload/delete/assign by role, so I scoped editing existing fields as superuser-only too (contributors can add new entries but not modify others') — flag it if you wanted contributors to have edit rights as well.
 
+Literature widget created:
+{literature_widget.js}(static/js/literature_widget.js)
+
 I also noticed on this pass that the taxon-search-picker code is now duplicated across index.html, taxonomy_editor.html, and now literature.html — not urgent, but a candidate for extracting into a shared script the same way literature_widget.js works, if you want that cleanup later.
 
 ## Editing samples and observations for superusers
