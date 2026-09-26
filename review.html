@@ -83,6 +83,15 @@
         .taxon-result-row .rank-tag { font-size: 0.7rem; color: #868e96; margin-left: 6px; }
 
         .empty-queue { text-align: center; padding: 50px 20px; color: #adb5bd; font-style: italic; }
+
+        .unresolved-taxon { color: #b08d1f; font-style: italic; }
+
+        .section-heading { color: #1b4332; font-size: 1.1rem; margin: 28px 0 4px; }
+        .section-subtext { color: #6c757d; font-size: 0.85rem; margin: 0 0 14px; }
+        .unresolved-row { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 18px; margin-bottom: 12px; }
+        .unresolved-row .ur-name { font-style: italic; color: #b08d1f; font-weight: 600; font-size: 1rem; }
+        .unresolved-row .ur-meta { font-size: 0.8rem; color: #6c757d; margin: 4px 0 10px; }
+        .unresolved-row .ur-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     </style>
 </head>
 <body>
@@ -104,6 +113,10 @@
         <div id="main-content" style="display: none;">
             <p class="queue-summary" id="queue-summary"></p>
             <div id="queue-list"></div>
+
+            <h2 class="section-heading">Unresolved taxa</h2>
+            <p class="section-subtext">Observations - usually from a batch upload - whose species name didn't exactly match anything in the taxonomy table. Assign an existing taxon if it's a typo or an already-catalogued synonym, or create a new one if it's genuinely new.</p>
+            <div id="unresolved-list"></div>
         </div>
     </div>
 
@@ -134,6 +147,7 @@
             currentUser = data;
             main.style.display = 'block';
             loadQueue();
+            loadUnresolvedTaxa();
         }
 
         async function loadQueue() {
@@ -196,7 +210,7 @@
 
             block.innerHTML = `
                 <div class="obs-heading">
-                    <span><span class="sci-name">${obs.scientificName}</span> <span class="obs-id">${obs.observationID}</span></span>
+                    <span><span class="sci-name">${obs.scientificName ? obs.scientificName : `<span class="unresolved-taxon">? ${obs.proposed_taxon_name || 'unresolved taxon'}</span>`}</span> <span class="obs-id">${obs.observationID}</span></span>
                     <span class="status-tag ${obs.verification_status}">${obs.verification_status}</span>
                 </div>
                 ${obs.identifiedBy ? `<div class="obs-detail-line">Identified by: ${obs.identifiedBy}</div>` : ''}
@@ -321,6 +335,105 @@
             });
 
             return wrap;
+        }
+
+        // ---------- unresolved taxa (batch-upload placeholders) ----------
+        async function loadUnresolvedTaxa() {
+            const listEl = document.getElementById('unresolved-list');
+            try {
+                const res = await fetch('/api/v1/admin/unresolved-taxa');
+                const data = await res.json();
+                if (data.observations.length === 0) {
+                    listEl.innerHTML = '<p class="empty-queue">Nothing awaiting taxon resolution.</p>';
+                    return;
+                }
+                listEl.innerHTML = '';
+                data.observations.forEach(obs => listEl.appendChild(renderUnresolvedRow(obs)));
+            } catch (err) {
+                listEl.innerHTML = '<p class="empty-queue">Could not load unresolved taxa.</p>';
+            }
+        }
+
+        function renderUnresolvedRow(obs) {
+            const row = document.createElement('div');
+            row.className = 'unresolved-row';
+            row.innerHTML = `
+                <div class="ur-name">${obs.proposed_taxon_name}</div>
+                <div class="ur-meta">
+                    ${obs.observationID} &middot; sample ${obs.eventID} (${obs.samplingLocation || 'unknown location'}, ${obs.earliestDateCollected || 'undated'})
+                    &middot; submitted by ${obs.submitted_by_name || 'unknown'} &middot; <span class="status-tag ${obs.verification_status}">${obs.verification_status}</span>
+                </div>
+                <div class="taxon-search-wrapper" style="max-width:400px; position:relative;">
+                    <input type="text" class="unresolved-taxon-search" placeholder="Search for the existing taxon this should be...">
+                    <div class="taxon-dropdown"></div>
+                </div>
+                <div class="ur-actions">
+                    <button type="button" class="small assign-btn" disabled>Assign taxon</button>
+                    <a href="/admin/taxonomy?new_taxon_name=${encodeURIComponent(obs.proposed_taxon_name)}" target="_blank" rel="noopener">
+                        <button type="button" class="small reassign" type="button">Create as new taxon &rarr;</button>
+                    </a>
+                    <span class="review-status" style="margin:0;"></span>
+                </div>
+            `;
+
+            let chosenTaxonId = null;
+            const searchBox = row.querySelector('.unresolved-taxon-search');
+            const dropdown = row.querySelector('.taxon-dropdown');
+            const assignBtn = row.querySelector('.assign-btn');
+            const statusEl = row.querySelector('.review-status');
+            let searchTimer = null;
+
+            searchBox.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                chosenTaxonId = null;
+                assignBtn.disabled = true;
+                const q = searchBox.value.trim();
+                if (q.length < 3) { dropdown.classList.remove('visible'); return; }
+                searchTimer = setTimeout(async () => {
+                    const res = await fetch(`/api/v1/taxonomy/search?q=${encodeURIComponent(q)}&limit=25`);
+                    const data = await res.json();
+                    dropdown.innerHTML = '';
+                    data.results.forEach(t => {
+                        const r = document.createElement('div');
+                        r.className = 'taxon-result-row';
+                        r.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank}</span>`;
+                        r.addEventListener('click', () => {
+                            chosenTaxonId = t.taxon_id;
+                            searchBox.value = t.scientific_name;
+                            dropdown.classList.remove('visible');
+                            assignBtn.disabled = false;
+                        });
+                        dropdown.appendChild(r);
+                    });
+                    dropdown.classList.add('visible');
+                }, 300);
+            });
+            document.addEventListener('click', (e) => {
+                if (!row.contains(e.target)) dropdown.classList.remove('visible');
+            });
+
+            assignBtn.addEventListener('click', async () => {
+                if (!chosenTaxonId) return;
+                statusEl.className = 'review-status';
+                statusEl.textContent = 'Assigning...';
+                try {
+                    const res = await fetch(`/api/v1/admin/observations/${encodeURIComponent(obs.observationID)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ taxonID: chosenTaxonId })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || 'Could not assign taxon');
+                    statusEl.className = 'review-status success';
+                    statusEl.textContent = 'Assigned.';
+                    setTimeout(loadUnresolvedTaxa, 600);
+                } catch (err) {
+                    statusEl.className = 'review-status error';
+                    statusEl.textContent = err.message;
+                }
+            });
+
+            return row;
         }
 
         checkAuthAndLoad();
