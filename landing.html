@@ -36,6 +36,11 @@
         .card:hover { transform: translateY(-3px); box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
         .card h2 { color: #2d6a4f; font-size: 1.2rem; margin-top: 0; }
         .card p { color: #495057; font-size: 0.9rem; line-height: 1.4; }
+        #admin-section { max-width: 800px; margin: 0 auto 40px; padding: 0 20px; display: none; }
+        #admin-section h2 { color: #7a5c00; font-size: 0.95rem; text-align: center; margin-bottom: 14px; }
+        #admin-cards { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+        #admin-cards .card { border-top: 3px solid #d4a017; width: 220px; padding: 18px 22px; }
+        #admin-cards .card h2 { font-size: 1.05rem; color: #7a5c00; }
         #about { max-width: 700px; margin: 0 auto 60px; padding: 0 20px; color: #495057; line-height: 1.6; }
         #about h2 { color: #1b4332; font-size: 1.1rem; }
     </style>
@@ -57,6 +62,9 @@
                 } else {
                     el.innerHTML = `<a href="/auth/login" style="color: white; text-decoration: underline;">Sign in with Google</a>`;
                 }
+                if (data.logged_in && (data.role === 'superuser' || data.role === 'hyperuser')) {
+                    document.getElementById('admin-section').style.display = 'block';
+                }
             });
     </script>
 
@@ -73,6 +81,24 @@
             <h2>Submit Observations</h2>
             <p>Submit details of samples or communities, and add records, demographics and specimen details.</p>
         </a>
+    </div>
+
+    <div id="admin-section">
+        <h2>Superuser tools</h2>
+        <div id="admin-cards">
+            <a class="card" href="/review">
+                <h2>Review Queue</h2>
+                <p>Verify, reject, or reassign contributor submissions.</p>
+            </a>
+            <a class="card" href="/admin/taxonomy">
+                <h2>Taxonomy Editor</h2>
+                <p>Rename, reparent, synonymise, or add taxa and their literature.</p>
+            </a>
+            <a class="card" href="/admin/schema">
+                <h2>Schema Viewer</h2>
+                <p>Inspect the database's live structure.</p>
+            </a>
+        </div>
     </div>
 
     <div id="about">
