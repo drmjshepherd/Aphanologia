@@ -78,6 +78,7 @@
         .taxon-result-row:hover { background: #e9ecef; }
         .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
         .taxon-result-row .rank-tag { font-size: 0.72rem; color: #868e96; margin-left: 6px; }
+        .taxon-result-row .authorship-tag { font-size: 0.78rem; color: #495057; margin-left: 6px; }
         .picker-current { font-size: 0.85rem; padding: 6px 0; color: #212529; }
         .picker-current .placeholder { color: #adb5bd; font-style: italic; }
 
@@ -556,12 +557,12 @@
                             data.results.forEach(t => {
                                 const row = document.createElement('div');
                                 row.className = 'taxon-result-row';
-                                row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank || ''}</span>`;
+                                row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="authorship-tag">${t.authorship || ''}</span><span class="rank-tag">${t.taxon_rank || ''}</span>`;
                                 row.addEventListener('click', () => {
                                     dropdown.classList.remove('visible');
                                     dropdown.innerHTML = '';
                                     suppress = true;
-                                    input.value = t.scientific_name;
+                                    input.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
                                     assignTaxonId = t.taxon_id;
                                     document.getElementById('assignTaxonCurrent').innerHTML = `<i>${t.scientific_name}</i> <span style="color:#adb5bd;">(${t.taxon_id})</span>`;
                                 });
