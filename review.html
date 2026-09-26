@@ -81,6 +81,7 @@
         .taxon-result-row:hover { background: #e9ecef; }
         .taxon-result-row .sci-name { font-style: italic; color: #1b4332; }
         .taxon-result-row .rank-tag { font-size: 0.7rem; color: #868e96; margin-left: 6px; }
+        .taxon-result-row .authorship-tag { font-size: 0.76rem; color: #495057; margin-left: 6px; }
 
         .empty-queue { text-align: center; padding: 50px 20px; color: #adb5bd; font-style: italic; }
 
@@ -288,10 +289,10 @@
                     data.results.forEach(t => {
                         const row = document.createElement('div');
                         row.className = 'taxon-result-row';
-                        row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank}</span>`;
+                        row.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="authorship-tag">${t.authorship || ''}</span><span class="rank-tag">${t.taxon_rank}</span>`;
                         row.addEventListener('click', () => {
                             chosenReassignTaxonId = t.taxon_id;
-                            searchBox.value = t.scientific_name;
+                            searchBox.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
                             dropdown.classList.remove('visible');
                         });
                         dropdown.appendChild(row);
@@ -396,10 +397,10 @@
                     data.results.forEach(t => {
                         const r = document.createElement('div');
                         r.className = 'taxon-result-row';
-                        r.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="rank-tag">${t.taxon_rank}</span>`;
+                        r.innerHTML = `<span class="sci-name">${t.scientific_name}</span><span class="authorship-tag">${t.authorship || ''}</span><span class="rank-tag">${t.taxon_rank}</span>`;
                         r.addEventListener('click', () => {
                             chosenTaxonId = t.taxon_id;
-                            searchBox.value = t.scientific_name;
+                            searchBox.value = `${t.scientific_name}${t.authorship ? ' ' + t.authorship : ''}`;
                             dropdown.classList.remove('visible');
                             assignBtn.disabled = false;
                         });
