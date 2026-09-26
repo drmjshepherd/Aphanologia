@@ -775,7 +775,7 @@ def get_public_record_view(observation_id: str):
                    o."collectionID", o."catalogNumber", o."basisOfRecord", o."idTechnique",
                    o."idText[free_text]" AS "idText", o."occurrenceRemarks",
                    o.verification_status, o.verified_by, o.verified_date,
-                   o.share_with_nbn, o.share_with_gbif, o.coordinate_uncertainty_meters,
+                   o.share_with_nbn, o.share_with_gbif,
                    o.entered_by, o.entered_at
             FROM observations o
             LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
@@ -856,8 +856,13 @@ class SampleSubmission(BaseModel):
     microhabitat: Optional[str] = None
     SHADe: Optional[str] = None  # e.g. "TsSc-5-6-5" - built by the guided SHADe picker on the submission form
     samplingProtocol: Optional[str] = None
+    samplesizeValue: Optional[float] = None
+    samplesizeUnit: Optional[str] = None  # required by the form whenever samplesizeValue is entered - anything from "handful" to "cm3"
     recordedBy: Optional[str] = None
     eventRemarks: Optional[str] = None
+    datarestricted: Optional[str] = None  # "Y" or "N" - ticked as a checkbox on the form
+    licenceHolder: Optional[str] = None   # required by the form whenever datarestricted == "Y"
+    dataSource: Optional[str] = None      # free-text notes only - not a substitute for a real literature/project link (see sourceCategory below)
 
     # Source of record - what kind of source this sample came from, and
     # (for the two structured categories) a link to the specific
@@ -1064,7 +1069,6 @@ class ObservationEditSubmission(BaseModel):
     occurrenceRemarks: Optional[str] = None
     share_with_nbn: Optional[bool] = True
     share_with_gbif: Optional[bool] = True
-    coordinate_uncertainty_meters: Optional[int] = None
     notes: Optional[str] = None  # reason, for the activity log
     # verification_status / verified_by / verified_date / verification_notes
     # are deliberately NOT editable here - they're managed through the
@@ -1116,6 +1120,11 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
     review - observations can then be added to it one at a time via
     /api/v1/submit/observation, using the returned eventID.
     """
+    if payload.samplesizeValue is not None and not (payload.samplesizeUnit and payload.samplesizeUnit.strip()):
+        raise HTTPException(status_code=400, detail="samplesizeUnit is required whenever samplesizeValue is given")
+    if payload.datarestricted == "Y" and not (payload.licenceHolder and payload.licenceHolder.strip()):
+        raise HTTPException(status_code=400, detail="licenceHolder is required when datarestricted is 'Y'")
+
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1145,21 +1154,31 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
         elif payload.sourceOtherDetail:
             data_source_summary = f"{payload.sourceCategory}: {payload.sourceOtherDetail}" if payload.sourceCategory else payload.sourceOtherDetail
 
+        # The person's own free-text "Data source notes" are
+        # deliberately supplementary, not a replacement - it's always
+        # appended to the structured summary above, never overwrites
+        # it, since the real traceable link (if any) is the
+        # sourceCategory + literature/project junction row, not this text.
+        if payload.dataSource and payload.dataSource.strip():
+            data_source_summary = f"{data_source_summary} - {payload.dataSource.strip()}" if data_source_summary else payload.dataSource.strip()
+
         cursor.execute("""
             INSERT INTO samples (
                 "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
                 "coordinateuncertaintyinmeters", "earliestDateCollected", "latestDateCollected",
-                "habitat", "microhabitat", "SHADe", "samplingProtocol", "recordedBy", "eventRemarks",
-                "dataSource[free text]",
+                "habitat", "microhabitat", "SHADe", "samplingProtocol",
+                "samplesizeValue", "samplesizeUnit", "recordedBy", "eventRemarks",
+                "datarestricted", "licenceHolder", "dataSource[free text]",
                 submitted_by_user_id, entered_by, entered_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
             );
         """, (
             new_id, payload.samplingLocation, payload.decimalLatitude, payload.decimalLongitude,
             payload.coordinateUncertaintyInMeters, payload.earliestDateCollected, payload.latestDateCollected,
-            payload.habitat, payload.microhabitat, payload.SHADe, payload.samplingProtocol, payload.recordedBy, payload.eventRemarks,
-            data_source_summary,
+            payload.habitat, payload.microhabitat, payload.SHADe, payload.samplingProtocol,
+            payload.samplesizeValue, payload.samplesizeUnit, payload.recordedBy, payload.eventRemarks,
+            payload.datarestricted, payload.licenceHolder, data_source_summary,
             user["user_id"], user["display_name"]
         ))
 
@@ -2547,6 +2566,7 @@ def list_my_samples(user: dict = Depends(require_contributor)):
                 "coordinateuncertaintyinmeters" AS "coordinateUncertaintyInMeters",
                 "earliestDateCollected", "latestDateCollected",
                 "habitat", "microhabitat", "SHADe", "samplingProtocol",
+                "samplesizeValue", "samplesizeUnit", "datarestricted", "licenceHolder",
                 "recordedBy", "eventRemarks", entered_at
             FROM samples
             WHERE submitted_by_user_id = %s
@@ -3954,16 +3974,16 @@ def admin_create_observation(event_id: str, payload: ObservationEditSubmission, 
                 "identificationVerificationStatus", "identificationRemarks",
                 "collectionID", "catalogNumber", "basisOfRecord", "idTechnique", "litID",
                 "idText[free_text]", "occurrenceRemarks", share_with_nbn, share_with_gbif,
-                coordinate_uncertainty_meters, verification_status, submitted_by_user_id, entered_by, entered_at
+                verification_status, submitted_by_user_id, entered_by, entered_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
             );
         """, (
             new_id, event_id, payload.taxonID, payload.identifiedBy,
             payload.identificationVerificationStatus, payload.identificationRemarks,
             payload.collectionID, payload.catalogNumber, payload.basisOfRecord, payload.idTechnique, payload.litID,
             payload.idText, payload.occurrenceRemarks, payload.share_with_nbn, payload.share_with_gbif,
-            payload.coordinate_uncertainty_meters, user["user_id"], user["display_name"]
+            user["user_id"], user["display_name"]
         ))
         _log_admin_action(cursor, user, "observation_create", "observations", new_id, {"eventID": event_id, "taxonID": payload.taxonID}, payload.notes)
         conn.commit()
@@ -4116,7 +4136,6 @@ def edit_observation(observation_id: str, payload: ObservationEditSubmission, us
             "occurrenceRemarks": payload.occurrenceRemarks,
             "share_with_nbn": payload.share_with_nbn,
             "share_with_gbif": payload.share_with_gbif,
-            "coordinate_uncertainty_meters": payload.coordinate_uncertainty_meters,
         }
         # A taxon assignment resolves any pending batch-upload
         # placeholder - once taxonID is set, the proposed name has
@@ -4135,14 +4154,14 @@ def edit_observation(observation_id: str, payload: ObservationEditSubmission, us
                 "identificationVerificationStatus" = %s, "identificationRemarks" = %s,
                 "collectionID" = %s, "catalogNumber" = %s, "basisOfRecord" = %s, "idTechnique" = %s, "litID" = %s,
                 "idText[free_text]" = %s, "occurrenceRemarks" = %s, share_with_nbn = %s, share_with_gbif = %s,
-                coordinate_uncertainty_meters = %s, proposed_taxon_name = %s
+                proposed_taxon_name = %s
             WHERE "observationID" = %s;
         """, (
             new_values["eventID"], new_values["taxonID"], new_values["identifiedBy"],
             new_values["identificationVerificationStatus"], new_values["identificationRemarks"],
             new_values["collectionID"], new_values["catalogNumber"], new_values["basisOfRecord"], new_values["idTechnique"], new_values["litID"],
             new_values["idText[free_text]"], new_values["occurrenceRemarks"], new_values["share_with_nbn"], new_values["share_with_gbif"],
-            new_values["coordinate_uncertainty_meters"], (None if clears_placeholder else current["proposed_taxon_name"]), observation_id
+            (None if clears_placeholder else current["proposed_taxon_name"]), observation_id
         ))
 
         _log_admin_action(cursor, user, "observation_edit", "observations", observation_id, field_changes, payload.notes)
@@ -4298,16 +4317,16 @@ def duplicate_observation(observation_id: str, payload: ObservationDuplicateSubm
                 "identificationVerificationStatus", "identificationRemarks",
                 "collectionID", "catalogNumber", "basisOfRecord", "idTechnique", "litID",
                 "idText[free_text]", "occurrenceRemarks", share_with_nbn, share_with_gbif,
-                coordinate_uncertainty_meters, verification_status, submitted_by_user_id, entered_by, entered_at
+                verification_status, submitted_by_user_id, entered_by, entered_at
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
             );
         """, (
             new_id, target_event_id, target_taxon_id, source["identifiedBy"],
             source["identificationVerificationStatus"], source["identificationRemarks"],
             source["collectionID"], source["catalogNumber"], source["basisOfRecord"], source["idTechnique"], source["litID"],
             source["idText[free_text]"], source["occurrenceRemarks"], source["share_with_nbn"], source["share_with_gbif"],
-            source["coordinate_uncertainty_meters"], user["user_id"], user["display_name"]
+            user["user_id"], user["display_name"]
         ))
 
         copied_demographics = 0
