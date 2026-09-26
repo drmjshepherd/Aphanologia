@@ -344,7 +344,7 @@
             return data.results;
         }
         function taxonRowHtml(t) {
-            return `<span class="r-main">${t.scientific_name}</span><span class="r-meta">${t.taxon_rank || ''}</span>`;
+            return `<span class="r-main">${t.scientific_name}</span><span class="r-meta">${t.authorship || ''}</span><span class="r-meta">${t.taxon_rank || ''}</span>`;
         }
 
         async function sampleSearchFn(q) {
