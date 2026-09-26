@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aphanologia - Schema Viewer</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8f9fa; color: #212529; }
+        #header { height: 50px; background: #1b4332; color: white; display: flex; align-items: center; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        #header h1 { margin: 0; font-size: 1.2rem; }
+        #header a.title-link { color: white; text-decoration: none; }
+        #header a.nav-link { color: #b7e4c7; margin-left: 20px; font-size: 0.9rem; text-decoration: none; }
+        #auth-status { margin-left: auto; font-size: 0.85rem; color: #b7e4c7; }
+        #auth-status a { color: white; }
+
+        #page { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+        .gate-message { text-align: center; padding: 60px 20px; color: #495057; }
+
+        #controls { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; }
+        #controls input {
+            flex-grow: 1; padding: 9px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.9rem;
+        }
+        #controls .views-note { font-size: 0.8rem; color: #6c757d; }
+
+        .table-card { background: white; border: 1px solid #dee2e6; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+        .table-card-header {
+            padding: 12px 16px; background: #e9f5ee; cursor: pointer;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .table-card-header h3 { margin: 0; color: #1b4332; font-size: 1rem; font-family: 'Consolas', monospace; }
+        .table-card-header .col-count { font-size: 0.78rem; color: #6c757d; }
+        .table-card-body { display: none; padding: 0 16px 14px; }
+        .table-card-body.expanded { display: block; }
+
+        table.col-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 8px; }
+        table.col-table th { text-align: left; color: #2d6a4f; font-size: 0.75rem; text-transform: uppercase; padding: 4px 8px; border-bottom: 2px solid #dee2e6; }
+        table.col-table td { padding: 5px 8px; border-bottom: 1px solid #f1f3f5; font-family: 'Consolas', monospace; }
+        table.col-table tr:hover td { background: #f8f9fa; }
+        .nullable-yes { color: #adb5bd; }
+        .nullable-no { color: #c1666b; font-weight: bold; }
+
+        .fk-section { margin-top: 12px; }
+        .fk-section h4 { font-size: 0.78rem; color: #2d6a4f; text-transform: uppercase; margin-bottom: 6px; }
+        .fk-row { font-size: 0.83rem; font-family: 'Consolas', monospace; padding: 3px 0; color: #495057; }
+        .fk-row .arrow { color: #2d6a4f; margin: 0 6px; }
+        .no-fks { font-size: 0.8rem; color: #adb5bd; font-style: italic; }
+
+        #views-panel { background: white; border: 1px solid #dee2e6; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; }
+        #views-panel h3 { margin-top: 0; color: #1b4332; font-size: 1rem; }
+        #views-panel ul { margin: 6px 0 0; padding-left: 20px; font-family: 'Consolas', monospace; font-size: 0.88rem; }
+
+        .refresh-note { font-size: 0.78rem; color: #adb5bd; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <a class="title-link" href="/"><h1>Aphanologia: Schema Viewer</h1></a>
+        <a class="nav-link" href="/map">Map</a>
+        <a class="nav-link" href="/taxonomy">Taxonomy Browser</a>
+        <a class="nav-link" href="/submit">Submit</a>
+        <div id="auth-status"></div>
+    </div>
+
+    <div id="page">
+        <div id="gate" class="gate-message" style="display: none;"></div>
+
+        <div id="main-content" style="display: none;">
+            <p class="refresh-note">
+                This reads the database's actual live structure every time you load this page &mdash;
+                it is never a stored document, so it can't go stale.
+            </p>
+
+            <div id="views-panel">
+                <h3>Views</h3>
+                <ul id="views-list"></ul>
+            </div>
+
+            <div id="controls">
+                <input type="text" id="filter-box" placeholder="Filter tables or column names...">
+                <span class="views-note" id="table-count-note"></span>
+            </div>
+
+            <div id="tables-list"></div>
+        </div>
+    </div>
+
+    <script>
+        let schemaData = null;
+
+        async function checkAuthAndLoad() {
+            const res = await fetch('/api/v1/auth/me');
+            const data = await res.json();
+            const authEl = document.getElementById('auth-status');
+            const gate = document.getElementById('gate');
+            const main = document.getElementById('main-content');
+
+            if (!data.logged_in) {
+                authEl.innerHTML = `<a href="/auth/login">Sign in with Google</a>`;
+                gate.style.display = 'block';
+                gate.innerHTML = `<p>You need to sign in to view this. <a href="/auth/login">Sign in with Google</a></p>`;
+                return;
+            }
+            authEl.innerHTML = `Signed in as ${data.display_name} (${data.role}) &middot; <a href="/auth/logout">Sign out</a>`;
+
+            if (!['superuser', 'hyperuser'].includes(data.role)) {
+                gate.style.display = 'block';
+                gate.innerHTML = `<p>This tool is restricted to superusers.</p>`;
+                return;
+            }
+
+            main.style.display = 'block';
+            loadSchema();
+        }
+
+        async function loadSchema() {
+            const listEl = document.getElementById('tables-list');
+            listEl.innerHTML = '<p>Loading live schema...</p>';
+            try {
+                const res = await fetch('/api/v1/admin/schema');
+                if (!res.ok) throw new Error('Could not load schema (are you a superuser?)');
+                schemaData = await res.json();
+                renderViews();
+                renderTables(schemaData.tables);
+                document.getElementById('table-count-note').textContent = `${schemaData.tables.length} tables`;
+            } catch (err) {
+                listEl.innerHTML = `<p>${err.message}</p>`;
+            }
+        }
+
+        function renderViews() {
+            const ul = document.getElementById('views-list');
+            ul.innerHTML = schemaData.views.map(v => `<li>${v}</li>`).join('');
+        }
+
+        function renderTables(tables) {
+            const listEl = document.getElementById('tables-list');
+            listEl.innerHTML = '';
+            tables.forEach(table => {
+                const card = document.createElement('div');
+                card.className = 'table-card';
+
+                const rowsHtml = table.columns.map(col => `
+                    <tr>
+                        <td>${col.column_name}</td>
+                        <td>${col.data_type}</td>
+                        <td class="${col.is_nullable === 'YES' ? 'nullable-yes' : 'nullable-no'}">${col.is_nullable === 'YES' ? 'nullable' : 'required'}</td>
+                        <td>${col.column_default || ''}</td>
+                    </tr>
+                `).join('');
+
+                const fkHtml = table.foreign_keys.length > 0
+                    ? table.foreign_keys.map(fk => `
+                        <div class="fk-row">${fk.from_column}<span class="arrow">&rarr;</span>${fk.to_table}.${fk.to_column}</div>
+                    `).join('')
+                    : '<div class="no-fks">No foreign keys on this table</div>';
+
+                card.innerHTML = `
+                    <div class="table-card-header" onclick="this.nextElementSibling.classList.toggle('expanded')">
+                        <h3>${table.table_name}</h3>
+                        <span class="col-count">${table.columns.length} columns</span>
+                    </div>
+                    <div class="table-card-body">
+                        <table class="col-table">
+                            <thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th></tr></thead>
+                            <tbody>${rowsHtml}</tbody>
+                        </table>
+                        <div class="fk-section">
+                            <h4>Foreign keys</h4>
+                            ${fkHtml}
+                        </div>
+                    </div>
+                `;
+                listEl.appendChild(card);
+            });
+        }
+
+        document.getElementById('filter-box').addEventListener('input', (e) => {
+            const q = e.target.value.trim().toLowerCase();
+            if (!schemaData) return;
+            if (!q) {
+                renderTables(schemaData.tables);
+                return;
+            }
+            const filtered = schemaData.tables.filter(t =>
+                t.table_name.toLowerCase().includes(q) ||
+                t.columns.some(c => c.column_name.toLowerCase().includes(q))
+            );
+            renderTables(filtered);
+            // Auto-expand matches so a column search doesn't require a second click
+            document.querySelectorAll('.table-card-body').forEach(el => el.classList.add('expanded'));
+        });
+
+        checkAuthAndLoad();
+    </script>
+</body>
+</html>
