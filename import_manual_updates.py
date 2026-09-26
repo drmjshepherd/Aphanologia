@@ -12,7 +12,7 @@ DB_CONFIG = {
 }
 
 # Excel file path
-EXCEL_FILE = r"C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx"
+EXCEL_FILE = r"C:\path\to\folder\AcariUKDatabase\260822_AcReS_Data_Upload.xlsx" # <--- Update with path to data upload folder
 SHEET_NAME = "manual_taxonomy_update"
 
 def import_manual_taxonomy_updates():
