@@ -603,7 +603,7 @@ from fastapi.responses import FileResponse
 # to proper cloud storage later, only this function needs to change -
 # every URL the website already generated will keep working exactly
 # as before.
-MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
+MEDIA_ROOT = r"C:\Users\Matth\OneDrive\Soil Biodiversity UK\Mesofauna Image Archive"
 
 @app.get("/api/v1/media/{media_id}")
 def get_media_file(media_id: int = Path(..., description="The media_id from observation_media")):
@@ -915,6 +915,14 @@ class ObservationSubmission(BaseModel):
     idTechnique: Optional[str] = None
     idText: Optional[str] = None
 
+class ObservationSelfEditSubmission(BaseModel):
+    taxonID: str
+    identifiedBy: Optional[str] = None
+    identificationVerificationStatus: Optional[str] = None
+    identificationRemarks: Optional[str] = None
+    basisOfRecord: Optional[str] = None
+    idTechnique: Optional[str] = None
+    idText: Optional[str] = None
 
 class DemographicSubmission(BaseModel):
     observationID: str  # which observation this demographic group belongs to
@@ -2416,6 +2424,57 @@ def submit_observation(payload: ObservationSubmission, user: dict = Depends(requ
         cursor.close()
         conn.close()
 
+@app.put("/api/v1/submit/observation/{observation_id}")
+def edit_own_observation(observation_id: str, payload: ObservationSelfEditSubmission, user: dict = Depends(require_contributor)):
+    """
+    Lets a contributor edit their own observation's identification
+    while it's still 'pending' - covers changing your mind about a
+    species ID, or fixing a typo, while still in the process of
+    entering demographics/specimens for it. Once a superuser has
+    reviewed the observation (accepted/rejected/reassigned), it's
+    frozen here and any further change goes through the audited
+    review workflow instead (submit_verification_action), so nothing
+    can be quietly altered after someone else has signed off on it.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM observations WHERE "observationID" = %s;', (observation_id,))
+        current = cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail="No such observation")
+        if current["submitted_by_user_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only edit your own submitted observations")
+        if current["verification_status"] != "pending":
+            raise HTTPException(status_code=409, detail="This observation has already been reviewed and can no longer be edited here")
+
+        cursor.execute('SELECT 1 FROM taxonomy WHERE "taxonID" = %s;', (payload.taxonID,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=400, detail="taxonID does not match any taxon")
+
+        cursor.execute("""
+            UPDATE observations SET
+                "taxonID" = %s, "identifiedBy" = %s,
+                "identificationVerificationStatus" = %s, "identificationRemarks" = %s,
+                "basisOfRecord" = %s, "idTechnique" = %s, "idText[free_text]" = %s
+            WHERE "observationID" = %s;
+        """, (
+            payload.taxonID, payload.identifiedBy,
+            payload.identificationVerificationStatus, payload.identificationRemarks,
+            payload.basisOfRecord, payload.idTechnique, payload.idText,
+            observation_id
+        ))
+        conn.commit()
+        return {"observationID": observation_id, "message": "Updated."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not update observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.post("/api/v1/submit/demographic")
 def submit_demographic(payload: DemographicSubmission, user: dict = Depends(require_contributor)):
