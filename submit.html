@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+	<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <title>Aphanologia - Submit a Record</title>
 
     <style>
@@ -40,6 +42,44 @@
             font-family: inherit;
         }
         .field textarea { resize: vertical; min-height: 50px; }
+
+		.map-picker-link {
+			margin-left: 8px;
+			font-size: 0.8em;
+			font-weight: normal;
+			background: none;
+			border: none;
+			color: #2a6ebb;
+			text-decoration: underline;
+			cursor: pointer;
+			padding: 0;
+		}
+		.map-picker-link:hover { color: #174a80; }
+
+		.map-picker-overlay {
+			position: fixed; inset: 0;
+			background: rgba(0,0,0,0.5);
+			display: none;
+			align-items: center; justify-content: center;
+			z-index: 10000;
+		}
+		.map-picker-box {
+			background: #fff;
+			border-radius: 8px;
+			width: min(900px, 92vw);
+			max-height: 92vh;
+			display: flex; flex-direction: column;
+			overflow: hidden;
+		}
+		.map-picker-header { padding: 12px 16px; border-bottom: 1px solid #ddd; }
+		.map-picker-instructions { margin: 4px 0 0; font-size: 0.85em; color: #555; }
+		#map-picker-map { width: 100%; height: 500px; }
+		.map-picker-footer {
+			padding: 10px 16px; border-top: 1px solid #ddd;
+			display: flex; align-items: center; justify-content: space-between;
+		}
+		#map-picker-readout { font-size: 0.9em; color: #333; }
+		.map-picker-buttons button { margin-left: 8px; }
 
         button {
             background: #2d6a4f;
@@ -237,7 +277,10 @@
 
                     <div class="field-row">
                         <div class="field full">
-                            <label for="f-location">Sampling location</label>
+                            <label for="f-location">
+								Sampling location
+								<button type="button" id="btn-choose-map" class="map-picker-link">📍 Choose on map</button>
+							</label>
                             <input type="text" id="f-location" placeholder="e.g. Burnham Beeches, Buckinghamshire">
                         </div>
                     </div>
@@ -255,6 +298,28 @@
                             <input type="number" id="f-uncertainty" placeholder="e.g. 100">
                         </div>
                     </div>
+					
+					<div id="map-picker-overlay" class="map-picker-overlay">
+						<div class="map-picker-box">
+							<div class="map-picker-header">
+								<strong>Choose sampling location</strong>
+								<p class="map-picker-instructions">
+									Scroll to zoom &middot; Left-click and drag to pan &middot;
+									Click once to place a point &middot; Click again to set the uncertainty radius &middot;
+									Click again anywhere to start over
+								</p>
+							</div>
+							<div id="map-picker-map"></div>
+							<div class="map-picker-footer">
+								<span id="map-picker-readout">No location selected</span>
+								<div class="map-picker-buttons">
+									<button type="button" id="map-picker-cancel">Cancel</button>
+									<button type="button" id="map-picker-select" disabled>Select</button>
+								</div>
+							</div>
+						</div>
+					</div>
+					
                     <div class="field-row">
                         <div class="field">
                             <label for="f-earliest">Earliest possible date</label>
@@ -432,6 +497,141 @@
     <script src="/static/js/literature_widget.js"></script>
     <script src="/static/js/shade_widget.js"></script>
     <script src="/static/js/sample_dropdown_options.js"></script>
+	
+	<script>
+		// ==================================================
+        // MAP LOCATION PICKER WITH RADIUS FOR COORD UNCERT
+        // ==================================================
+		(function () {
+			let pickerMap = null;
+			let marker = null;
+			let circle = null;
+			let previewCircle = null;
+			let state = 'idle'; // 'idle' | 'point-set' | 'confirmed'
+			let radiusMeters = null;
+
+			function ensureMapInitialised() {
+				if (pickerMap) return;
+
+				pickerMap = L.map('map-picker-map').setView([52.9, -1.5], 6);
+
+				const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+					attribution: '&copy; OpenStreetMap contributors | Aphanologia'
+				}).addTo(pickerMap);
+
+				const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+					attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Style: &copy; OpenTopoMap (CC-BY-SA)',
+					maxZoom: 17
+				});
+
+				L.control.layers(
+					{ "Standard": osm, "Terrain (contours)": topo },
+					{},
+					{ position: 'topright' }
+				).addTo(pickerMap);
+
+				pickerMap.on('click', handleMapClick);
+				pickerMap.on('mousemove', handleMapMouseMove);
+			}
+
+			function handleMapClick(e) {
+				if (state === 'idle') {
+					placePoint(e.latlng);
+				} else if (state === 'point-set') {
+					confirmRadius(e.latlng);
+				} else if (state === 'confirmed') {
+					resetPicker();
+					placePoint(e.latlng);
+				}
+			}
+
+			function placePoint(latlng) {
+				marker = L.marker(latlng).addTo(pickerMap);
+				state = 'point-set';
+				radiusMeters = null;
+				document.getElementById('map-picker-select').disabled = false;
+				updateReadout();
+			}
+
+			function handleMapMouseMove(e) {
+				if (state !== 'point-set' || !marker) return;
+				const r = marker.getLatLng().distanceTo(e.latlng);
+				if (previewCircle) {
+					previewCircle.setLatLng(marker.getLatLng()).setRadius(r);
+				} else {
+					previewCircle = L.circle(marker.getLatLng(), {
+						radius: r, color: '#2a6ebb', dashArray: '4,4', fillOpacity: 0.05
+					}).addTo(pickerMap);
+				}
+				updateReadout(r);
+			}
+
+			function confirmRadius(latlng) {
+				radiusMeters = marker.getLatLng().distanceTo(latlng);
+				if (previewCircle) { pickerMap.removeLayer(previewCircle); previewCircle = null; }
+				circle = L.circle(marker.getLatLng(), {
+					radius: radiusMeters, color: '#c0392b', fillOpacity: 0.1
+				}).addTo(pickerMap);
+				state = 'confirmed';
+				updateReadout();
+			}
+
+			function resetPicker() {
+				if (marker) { pickerMap.removeLayer(marker); marker = null; }
+				if (circle) { pickerMap.removeLayer(circle); circle = null; }
+				if (previewCircle) { pickerMap.removeLayer(previewCircle); previewCircle = null; }
+				state = 'idle';
+				radiusMeters = null;
+				document.getElementById('map-picker-select').disabled = true;
+				updateReadout();
+			}
+
+			function updateReadout(liveRadius) {
+				const el = document.getElementById('map-picker-readout');
+				if (!marker) { el.textContent = 'No location selected'; return; }
+				const ll = marker.getLatLng();
+				const latStr = ll.lat.toFixed(5);
+				const lngStr = ll.lng.toFixed(5);
+				if (radiusMeters !== null) {
+					el.textContent = `${latStr}, ${lngStr} — uncertainty ${Math.round(radiusMeters)} m`;
+				} else if (liveRadius !== undefined) {
+					el.textContent = `${latStr}, ${lngStr} — click again to set radius (currently ${Math.round(liveRadius)} m)`;
+				} else {
+					el.textContent = `${latStr}, ${lngStr} — click again to set an uncertainty radius, or Select now`;
+				}
+			}
+
+			function openMapPicker() {
+				document.getElementById('map-picker-overlay').style.display = 'flex';
+				ensureMapInitialised();
+				setTimeout(() => pickerMap.invalidateSize(), 0);
+			}
+
+			function closeMapPicker() {
+				document.getElementById('map-picker-overlay').style.display = 'none';
+			}
+
+			document.getElementById('btn-choose-map').addEventListener('click', openMapPicker);
+
+			document.getElementById('map-picker-cancel').addEventListener('click', function () {
+				resetPicker();
+				closeMapPicker();
+			});
+
+			document.getElementById('map-picker-select').addEventListener('click', function () {
+				if (!marker) return;
+				const ll = marker.getLatLng();
+				document.getElementById('f-lat').value = ll.lat.toFixed(6);
+				document.getElementById('f-lng').value = ll.lng.toFixed(6);
+				if (radiusMeters !== null) {
+					document.getElementById('f-uncertainty').value = Math.round(radiusMeters);
+				}
+				resetPicker();
+				closeMapPicker();
+			});
+		})();
+		</script>	
+	
     <script>
         // ==================================================
         // AUTH GATE
@@ -469,6 +669,7 @@
         }
 
         checkAuth();
+
 
         // ==================================================
         // SHADe BUILDER (shared widget)
