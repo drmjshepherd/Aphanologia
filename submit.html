@@ -471,9 +471,13 @@
 
                     <button type="submit">Add this observation</button>
                     <button type="button" class="secondary" onclick="finishSample()">Done with this sample</button>
-                    <div id="observation-status"></div>
+                    <div id="observation-saved-banner" style="display:none;">
+						<span id="observation-saved-banner-text"></span>
+						<button type="button" id="btn-edit-observation">Edit this observation</button>
+					</div>
+					<div id="observation-status"></div>
                 </form>
-
+				<button type="button" id="btn-new-observation" style="display:none;">+ Add another species to this sample</button>
                 <div id="new-obs-demographics"></div>
             </div>
 
@@ -978,6 +982,7 @@
         // OBSERVATION FORM (taxon search + submit)
         // ==================================================
         let selectedTaxonId = null;
+        let currentObservationID = null;
         const obsSearchBox = document.getElementById('obs-taxon-search');
         const obsDropdown = document.getElementById('obs-taxon-dropdown');
         let obsSearchTimer = null;
@@ -1034,7 +1039,9 @@
             const statusEl = document.getElementById('observation-status');
             statusEl.innerHTML = '';
 
-            if (!activeEventId) {
+            const isEditing = !!currentObservationID;
+
+            if (!isEditing && !activeEventId) {
                 statusEl.innerHTML = `<div class="status-message error">No active sample - create or resume one first.</div>`;
                 return;
             }
@@ -1044,7 +1051,6 @@
             }
 
             const payload = {
-                eventID: activeEventId,
                 taxonID: selectedTaxonId,
                 identifiedBy: document.getElementById('obs-identifiedby').value || null,
                 identificationVerificationStatus: document.getElementById('obs-verification').value || null,
@@ -1052,33 +1058,72 @@
                 idTechnique: document.getElementById('obs-technique').value || null,
                 idText: document.getElementById('obs-idtext').value || null,
             };
+            if (!isEditing) payload.eventID = activeEventId;
+
+            const url = isEditing ? `/api/v1/submit/observation/${currentObservationID}` : '/api/v1/submit/observation';
+            const method = isEditing ? 'PUT' : 'POST';
 
             try {
-                const res = await fetch('/api/v1/submit/observation', {
-                    method: 'POST',
+                const res = await fetch(url, {
+                    method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || 'Could not add observation');
+                if (!res.ok) throw new Error(data.detail || 'Could not save observation');
 
-                statusEl.innerHTML = `<div class="status-message success">Added. You can add another, or select "Done with this sample".</div>`;
-                const addedTaxonName = obsSearchBox.value || 'this species';
-                document.getElementById('observation-form').reset();
-                selectedTaxonId = null;
-                document.getElementById('obs-taxon-selected').textContent = '';
+                currentObservationID = data.observationID || currentObservationID;
+                const taxonName = obsSearchBox.value || 'this species';
 
-                renderObservationDemographics(
-                    document.getElementById('new-obs-demographics'),
-                    data.observationID,
-                    addedTaxonName,
-                    []
-                );
+                statusEl.innerHTML = isEditing
+                    ? `<div class="status-message success">Updated.</div>`
+                    : `<div class="status-message success">Added. You can add demographic detail below, edit the identification above, or add another species once you're done here.</div>`;
+
+                setObservationSavedState(taxonName);
+                document.getElementById('btn-new-observation').style.display = 'inline-block';
+
+                if (!isEditing) {
+                    renderObservationDemographics(
+                        document.getElementById('new-obs-demographics'),
+                        currentObservationID,
+                        taxonName,
+                        []
+                    );
+                }
 
                 loadMySamples();
             } catch (err) {
                 statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
             }
+        });
+
+        function setObservationSavedState(taxonLabel) {
+            document.getElementById('observation-form').querySelectorAll('input, select, textarea').forEach(el => el.disabled = true);
+            document.getElementById('observation-form-submit-btn').style.display = 'none';
+            document.getElementById('observation-saved-banner').style.display = 'block';
+            document.getElementById('observation-saved-banner-text').textContent = `✓ Observation saved: ${taxonLabel}`;
+        }
+
+        function setObservationEditableState() {
+            document.getElementById('observation-form').querySelectorAll('input, select, textarea').forEach(el => el.disabled = false);
+            const btn = document.getElementById('observation-form-submit-btn');
+            btn.style.display = '';
+            btn.textContent = currentObservationID ? 'Save changes' : 'Add this observation';
+            document.getElementById('observation-saved-banner').style.display = 'none';
+        }
+
+        document.getElementById('btn-edit-observation').addEventListener('click', setObservationEditableState);
+
+        document.getElementById('btn-new-observation').addEventListener('click', () => {
+            currentObservationID = null;
+            document.getElementById('observation-form').reset();
+            selectedTaxonId = null;
+            document.getElementById('obs-taxon-selected').textContent = '';
+            setObservationEditableState();
+            document.getElementById('observation-form-submit-btn').textContent = 'Add this observation';
+            document.getElementById('new-obs-demographics').innerHTML = '';
+            document.getElementById('observation-status').innerHTML = '';
+            document.getElementById('btn-new-observation').style.display = 'none';
         });
 
         // ==================================================
