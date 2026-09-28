@@ -603,7 +603,7 @@ from fastapi.responses import FileResponse
 # to proper cloud storage later, only this function needs to change -
 # every URL the website already generated will keep working exactly
 # as before.
-MEDIA_ROOT = r"C:\Users\Matth\OneDrive\Soil Biodiversity UK\Mesofauna Image Archive"
+MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
 
 @app.get("/api/v1/media/{media_id}")
 def get_media_file(media_id: int = Path(..., description="The media_id from observation_media")):
