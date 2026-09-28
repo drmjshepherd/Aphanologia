@@ -874,3 +874,5 @@ In effecting this change, another legacy column issue occurred with "acceptedNam
 
 A "click on map" location selector was added to the submit.html "add sample" details, to allow users to click on a zoomable map, with OSM and open source topographic details, allowing zoom (mouse scroll), pan (left click and drag) and select (first left click) with adding an uncertainty radius being added by a second click with the radius shown by a dynamically expanding/contracting circle around the original click.
 
+The submit sample workflow was cleaned up so that information on a submitted sample remains visible in a panel above the observations being entered, and similarly observations remain visible in a similar panel while demongraphic or specimen infomration is entered, to make it clearer which sample or observation is being added to.
+this involved changes to submit.html and to main.py
