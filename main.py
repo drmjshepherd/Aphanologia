@@ -603,7 +603,7 @@ from fastapi.responses import FileResponse
 # to proper cloud storage later, only this function needs to change -
 # every URL the website already generated will keep working exactly
 # as before.
-MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
+MEDIA_ROOT = r"C:\Users\Matth\OneDrive\Soil Biodiversity UK\Mesofauna Image Archive"
 
 @app.get("/api/v1/media/{media_id}")
 def get_media_file(media_id: int = Path(..., description="The media_id from observation_media")):
@@ -914,6 +914,33 @@ class ObservationSubmission(BaseModel):
     basisOfRecord: Optional[str] = None
     idTechnique: Optional[str] = None
     idText: Optional[str] = None
+
+class SampleSelfEditSubmission(BaseModel):
+    samplingLocation: Optional[str] = None
+    decimalLatitude: Optional[float] = None
+    decimalLongitude: Optional[float] = None
+    coordinateUncertaintyInMeters: Optional[int] = None
+    earliestDateCollected: Optional[str] = None
+    latestDateCollected: Optional[str] = None
+    habitat: Optional[str] = None
+    microhabitat: Optional[str] = None
+    SHADe: Optional[str] = None
+    samplingProtocol: Optional[str] = None
+    samplesizeValue: Optional[float] = None
+    samplesizeUnit: Optional[str] = None
+    recordedBy: Optional[str] = None
+    eventRemarks: Optional[str] = None
+    datarestricted: Optional[str] = None
+    licenceHolder: Optional[str] = None
+    # Source of record (sourceCategory / sourceLiteratureID /
+    # sourceProjectID / dataSource) is deliberately NOT editable here.
+    # It's fixed once the sample is created, same as an observation's
+    # eventID can't be re-homed by its own submitter - only a
+    # superuser can change it, via the dedicated sample
+    # literature/project link endpoints. dataSource[free text] itself
+    # is composed server-side at creation time (see submit_sample) and
+    # is left untouched by this endpoint so that composition is never
+    # silently overwritten.
 
 class ObservationSelfEditSubmission(BaseModel):
     taxonID: str
@@ -1226,6 +1253,79 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
         cursor.close()
         conn.close()
 
+@app.put("/api/v1/submit/sample/{event_id}")
+def edit_own_sample(event_id: str, payload: SampleSelfEditSubmission, user: dict = Depends(require_contributor)):
+    """
+    Lets a contributor edit their own sample's details, PROVIDED every
+    observation currently attached to it (if any) is still pending
+    review - the same "still in the recorder's hands" boundary used
+    for withdrawal (see withdraw_sample) and for self-editing an
+    observation. Once a superuser has reviewed anything under this
+    sample, it's frozen here and can only be edited through the
+    superuser record editor (edit_sample).
+    """
+    if payload.samplesizeValue is not None and not (payload.samplesizeUnit and payload.samplesizeUnit.strip()):
+        raise HTTPException(status_code=400, detail="samplesizeUnit is required whenever samplesizeValue is given")
+    if payload.datarestricted == "Y" and not (payload.licenceHolder and payload.licenceHolder.strip()):
+        raise HTTPException(status_code=400, detail="licenceHolder is required when datarestricted is 'Y'")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT submitted_by_user_id FROM samples WHERE "eventID" = %s;', (event_id,))
+        sample = cursor.fetchone()
+        if not sample:
+            raise HTTPException(status_code=404, detail="No such sample")
+        if sample["submitted_by_user_id"] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="You can only edit your own submitted samples")
+
+        cursor.execute("""
+            SELECT COUNT(*) AS non_pending_count
+            FROM observations
+            WHERE "eventID" = %s AND verification_status != 'pending';
+        """, (event_id,))
+        if cursor.fetchone()["non_pending_count"] > 0:
+            raise HTTPException(
+                status_code=409,
+                detail="This sample has already been reviewed and can no longer be edited here"
+            )
+
+        cursor.execute("""
+            UPDATE samples SET
+                "samplingLocation" = %s, "decimalLatitude" = %s, "decimalLongitude" = %s,
+                "coordinateuncertaintyinmeters" = %s, "earliestDateCollected" = %s, "latestDateCollected" = %s,
+                "habitat" = %s, "microhabitat" = %s, "SHADe" = %s, "samplingProtocol" = %s,
+                "samplesizeValue" = %s, "samplesizeUnit" = %s, "recordedBy" = %s, "eventRemarks" = %s,
+                "datarestricted" = %s, "licenceHolder" = %s
+            WHERE "eventID" = %s;
+        """, (
+            payload.samplingLocation, payload.decimalLatitude, payload.decimalLongitude,
+            payload.coordinateUncertaintyInMeters, payload.earliestDateCollected, payload.latestDateCollected,
+            payload.habitat, payload.microhabitat, payload.SHADe, payload.samplingProtocol,
+            payload.samplesizeValue, payload.samplesizeUnit, payload.recordedBy, payload.eventRemarks,
+            payload.datarestricted, payload.licenceHolder,
+            event_id
+        ))
+
+        if payload.decimalLatitude is not None and payload.decimalLongitude is not None:
+            cursor.execute("""
+                UPDATE samples SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+                WHERE "eventID" = %s;
+            """, (payload.decimalLongitude, payload.decimalLatitude, event_id))
+        else:
+            cursor.execute('UPDATE samples SET geom_wgs84 = NULL WHERE "eventID" = %s;', (event_id,))
+
+        conn.commit()
+        return {"eventID": event_id, "message": "Saved."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save sample: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
 
 # ==========================================================
 # BATCH UPLOAD (contributor - superusers additionally skip review)
@@ -2750,8 +2850,13 @@ def withdraw_sample(event_id: str, user: dict = Depends(require_contributor)):
     verified/queried/rejected by a superuser, the whole withdrawal
     is refused - nothing reviewed can be silently removed this way.
     Withdrawing the sample also withdraws any still-pending
-    observations attached to it, since an empty orphaned sample
-    left behind would serve no purpose.
+    observations attached to it, and everything genuinely
+    subordinate to those (demographics, their specimens and
+    barcodes, media at any level, literature links, and any
+    taxonomy override), plus the sample's own literature/project
+    links - mirroring the cascade the superuser delete tools use,
+    so nothing is ever left orphaned or blocks the delete with a
+    foreign key error.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -2774,8 +2879,33 @@ def withdraw_sample(event_id: str, user: dict = Depends(require_contributor)):
                 detail="Cannot withdraw: this sample has at least one observation that has already been reviewed"
             )
 
-        cursor.execute('DELETE FROM observations WHERE "eventID" = %s;', (event_id,))
+        cursor.execute('SELECT "observationID" FROM observations WHERE "eventID" = %s;', (event_id,))
+        observation_ids = [r["observationID"] for r in cursor.fetchall()]
+
+        if observation_ids:
+            cursor.execute('SELECT "demographicID" FROM observation_demographics WHERE "observationID" = ANY(%s);', (observation_ids,))
+            demographic_ids = [r["demographicID"] for r in cursor.fetchall()]
+
+            if demographic_ids:
+                cursor.execute('SELECT "specimenID" FROM specimens WHERE "demographicID" = ANY(%s);', (demographic_ids,))
+                specimen_ids = [r["specimenID"] for r in cursor.fetchall()]
+                if specimen_ids:
+                    cursor.execute('DELETE FROM specimen_barcodes WHERE specimen_id = ANY(%s);', (specimen_ids,))
+                    cursor.execute('DELETE FROM observation_media WHERE specimen_id = ANY(%s);', (specimen_ids,))
+                    cursor.execute('DELETE FROM specimens WHERE "specimenID" = ANY(%s);', (specimen_ids,))
+                cursor.execute('DELETE FROM observation_media WHERE demographic_id = ANY(%s);', (demographic_ids,))
+                cursor.execute('DELETE FROM observation_demographics WHERE "demographicID" = ANY(%s);', (demographic_ids,))
+
+            cursor.execute('DELETE FROM observation_media WHERE observation_id = ANY(%s);', (observation_ids,))
+            cursor.execute('DELETE FROM observation_literature_junction WHERE "observationID" = ANY(%s);', (observation_ids,))
+            cursor.execute('DELETE FROM observation_verification_actions WHERE "observationID" = ANY(%s);', (observation_ids,))
+            cursor.execute('DELETE FROM observation_taxonomy_override WHERE observation_id = ANY(%s);', (observation_ids,))
+            cursor.execute('DELETE FROM observations WHERE "eventID" = %s;', (event_id,))
+
+        cursor.execute('DELETE FROM sample_literature_junction WHERE "eventID" = %s;', (event_id,))
+        cursor.execute('DELETE FROM sample_project_junction WHERE "eventID" = %s;', (event_id,))
         cursor.execute('DELETE FROM samples WHERE "eventID" = %s;', (event_id,))
+
         conn.commit()
         return {"message": f"Sample {event_id} and any pending observations within it were withdrawn"}
     except HTTPException:
