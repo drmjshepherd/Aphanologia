@@ -124,6 +124,19 @@
             margin-top: 6px; font-size: 0.85rem; color: #2d6a4f; font-weight: 600; font-style: italic;
         }
 
+		.summary-box {
+			border: 1px solid #d8e9de;
+			border-radius: 6px;
+			padding: 14px 16px;
+			background: #f4faf6;
+			margin-bottom: 14px;
+		}
+		.summary-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+		.summary-header .summary-title { font-weight: 600; color: #1b4332; font-size: 1rem; }
+		.summary-row { font-size: 0.87rem; margin-bottom: 4px; color: #495057; }
+		.summary-row .summary-label { font-weight: 600; color: #2d6a4f; }
+		.summary-locked-note { font-size: 0.82rem; color: #6c757d; font-style: italic; }
+
         /* --- Pending submissions list --- */
         .sample-card { border: 1px solid #dee2e6; border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
         .sample-card-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
@@ -141,7 +154,14 @@
         }
         .card-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
         .no-samples-message { color: #adb5bd; font-style: italic; font-size: 0.88rem; }
-
+		.obs-action-row {
+			display: flex;
+			gap: 10px;
+			align-items: center;
+			margin-top: 16px;
+			padding-top: 12px;
+			border-top: 1px solid #e9ecef;
+		}
         /* --- Demographics & specimens (nested under an observation) --- */
         .demo-container { margin-top: 10px; padding-left: 14px; border-left: 2px solid #d8e9de; }
         .demo-group-card {
@@ -205,14 +225,16 @@
             <!-- PANEL 1: New sample                            -->
             <!-- ============================================= -->
             <div class="panel" id="new-sample-panel">
-                <h2>1. Start a new sample</h2>
-                <p class="panel-intro">
-                    A sample is a single sampling event &mdash; one visit to one place, which might contain
-                    one specimen or many. Once you've created it, you'll add one or more species
-                    observations to it below.
-                </p>
+				<h2>1. Start a new sample</h2>
+				<p class="panel-intro">
+					A sample is a single sampling event &mdash; one visit to one place, which might contain
+					one specimen or many. Once you've created it, you'll add one or more species
+					observations to it below.
+				</p>
 
-                <form id="sample-form">
+				<div id="sample-summary" style="display:none;"></div>
+
+				<form id="sample-form">
                     <div class="field-row">
                         <div class="field full">
                             <label for="f-source-category">Source of record</label>
@@ -396,10 +418,11 @@
                         </div>
                     </div>
 
-                    <div class="save-row" style="display:flex; gap:10px; align-items:center;">
-                        <button type="submit">Create sample</button>
-                        <button type="button" class="secondary" onclick="cancelSampleForm()">Cancel</button>
-                    </div>
+					 <div class="save-row" style="display:flex; gap:10px; align-items:center;">
+						<button type="submit" id="sample-form-submit-btn">Create sample</button>
+						<button type="button" class="secondary" id="sample-cancel-edit-btn" style="display:none;" onclick="cancelEditSample()">Cancel edit</button>
+						<button type="button" class="secondary" id="sample-cancel-btn" onclick="cancelSampleForm()">Cancel</button>
+					</div>
                     <div id="sample-status"></div>
                 </form>
             </div>
@@ -415,71 +438,73 @@
                     <b id="active-event-id-label"></b>.
                 </p>
 
-                <form id="observation-form">
-                    <div class="field-row">
-                        <div class="field full taxon-search-wrapper">
-                            <label for="obs-taxon-search">Species / taxon</label>
-                            <input type="text" id="obs-taxon-search" placeholder="Start typing a scientific name (min 3 letters)..." autocomplete="off">
-                            <div id="obs-taxon-dropdown"></div>
-                            <div id="obs-taxon-selected"></div>
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field">
-                            <label for="obs-identifiedby">Identified by</label>
-                            <input type="text" id="obs-identifiedby">
-                        </div>
-                        <div class="field">
-                            <label for="obs-verification">Confidence in identification</label>
-                            <select id="obs-verification">
-                                <option value="">-- Select --</option>
-                                <option value="certain">Certain</option>
-                                <option value="probable">Probable</option>
-                                <option value="plausible">Plausible</option>
-                                <option value="unlikely">Unlikely</option>
-                                <option value="unverified">Unverified</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field">
-                            <label for="obs-basis">Basis of record</label>
-                            <select id="obs-basis">
-                                <option value="">-- Select --</option>
-                                <option value="Preserved specimen">Preserved specimen</option>
-                                <option value="Still photograph">Still photograph</option>
-                                <option value="COI barcode">COI barcode</option>
-                                <option value="Human observation">Human observation</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label for="obs-technique">Identification technique</label>
-                            <select id="obs-technique">
-                                <option value="">-- Select --</option>
-                                <option value="Morphological">Morphological observation</option>
-                                <option value="Genetic">Genetics</option>
-                                <option value="Image recognition">Image recognition</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field full">
-                            <label for="obs-idtext">Notes <span class="hint">(ecology, behaviour etc. - not identification notes)</span></label>
-                            <textarea id="obs-idtext"></textarea>
-                        </div>
-                    </div>
+				<div id="observation-summary" style="display:none;"></div>
 
-                    <button type="submit">Add this observation</button>
-                    <button type="button" class="secondary" onclick="finishSample()">Done with this sample</button>
-                    <div id="observation-saved-banner" style="display:none;">
-						<span id="observation-saved-banner-text"></span>
-						<button type="button" id="btn-edit-observation">Edit this observation</button>
+				<form id="observation-form">
+					<div class="field-row">
+						<div class="field full taxon-search-wrapper">
+							<label for="obs-taxon-search">Species / taxon</label>
+							<input type="text" id="obs-taxon-search" placeholder="Start typing a scientific name (min 3 letters)..." autocomplete="off">
+							<div id="obs-taxon-dropdown"></div>
+							<div id="obs-taxon-selected"></div>
+						</div>
+					</div>
+					<div class="field-row">
+						<div class="field">
+							<label for="obs-identifiedby">Identified by</label>
+							<input type="text" id="obs-identifiedby">
+						</div>
+						<div class="field">
+							<label for="obs-verification">Confidence in identification</label>
+							<select id="obs-verification">
+								<option value="">-- Select --</option>
+								<option value="certain">Certain</option>
+								<option value="probable">Probable</option>
+								<option value="plausible">Plausible</option>
+								<option value="unlikely">Unlikely</option>
+								<option value="unverified">Unverified</option>
+							</select>
+						</div>
+					</div>
+					<div class="field-row">
+						<div class="field">
+							<label for="obs-basis">Basis of record</label>
+							<select id="obs-basis">
+								<option value="">-- Select --</option>
+								<option value="Preserved specimen">Preserved specimen</option>
+								<option value="Still photograph">Still photograph</option>
+								<option value="COI barcode">COI barcode</option>
+								<option value="Human observation">Human observation</option>
+							</select>
+						</div>
+						<div class="field">
+							<label for="obs-technique">Identification technique</label>
+							<select id="obs-technique">
+								<option value="">-- Select --</option>
+								<option value="Morphological">Morphological observation</option>
+								<option value="Genetic">Genetics</option>
+								<option value="Image recognition">Image recognition</option>
+							</select>
+						</div>
+					</div>
+					<div class="field-row">
+						<div class="field full">
+							<label for="obs-idtext">Notes <span class="hint">(ecology, behaviour etc. - not identification notes)</span></label>
+							<textarea id="obs-idtext"></textarea>
+						</div>
+					</div>
+
+					<div class="save-row" style="display:flex; gap:10px; align-items:center;">
+						<button type="submit" id="observation-form-submit-btn">Add this observation</button>
+						<button type="button" class="secondary" id="obs-cancel-edit-btn" style="display:none;" onclick="cancelEditObservation()">Cancel edit</button>
 					</div>
 					<div id="observation-status"></div>
-                </form>
-				<button type="button" id="btn-new-observation" style="display:none;">+ Add another species to this sample</button>
-                <div id="new-obs-demographics"></div>
-            </div>
+				</form>
+				<div id="new-obs-demographics"></div>
+				<div class="obs-action-row">
+					<button type="button" id="btn-new-observation" style="display: none;">+ Add another species to this sample</button>
+					<button type="button" class="secondary" onclick="finishSample()">Done with this sample</button>
+				</div>
 
             <!-- ============================================= -->
             <!-- PANEL 3: Your pending submissions               -->
@@ -833,12 +858,80 @@
         // ==================================================
         // SAMPLE FORM
         // ==================================================
-        let activeEventId = null;
+        let activeEventId = null;          // which sample observations are currently being added to
+        let editingSampleEventId = null;   // non-null while the form is editing an existing sample, rather than creating a new one
+        let editingSampleSnapshot = null;  // the sample object being edited, so "Cancel edit" can revert without a re-fetch
+
+        function fieldRow(label, value) {
+            if (value === null || value === undefined || value === '') return '';
+            return `<div class="summary-row"><span class="summary-label">${label}:</span> ${value}</div>`;
+        }
+
+        function sampleIsFullyPending(sample) {
+            return !sample.observations || sample.observations.length === 0 ||
+                sample.observations.every(o => o.verification_status === 'pending');
+        }
+
+        function renderSampleSummary(sample) {
+            const allPending = sampleIsFullyPending(sample);
+            const rows = [
+                fieldRow('Location', sample.samplingLocation),
+                fieldRow('Coordinates', (sample.decimalLatitude != null && sample.decimalLongitude != null)
+                    ? `${sample.decimalLatitude}, ${sample.decimalLongitude}${sample.coordinateUncertaintyInMeters != null ? ` (&plusmn;${sample.coordinateUncertaintyInMeters}m)` : ''}`
+                    : null),
+                fieldRow('Date', [sample.earliestDateCollected, sample.latestDateCollected].filter(Boolean).join(' to ')),
+                fieldRow('Habitat', sample.habitat),
+                fieldRow('Microhabitat', sample.microhabitat),
+                fieldRow('SHADe code', sample.SHADe),
+                fieldRow('Sampling protocol', sample.samplingProtocol),
+                fieldRow('Sample size', sample.samplesizeValue != null ? `${sample.samplesizeValue} ${sample.samplesizeUnit || ''}`.trim() : null),
+                fieldRow('Recorded by', sample.recordedBy),
+                fieldRow('Remarks', sample.eventRemarks),
+                fieldRow('Data restricted', sample.datarestricted === 'Y' ? `Yes (licence holder: ${sample.licenceHolder || 'not specified'})` : null),
+            ].join('');
+
+            const sampleJson = JSON.stringify(sample).replace(/'/g, "&apos;");
+            const editControl = allPending
+                ? `<button type="button" class="small" onclick='beginEditSample(${sampleJson})'>Edit</button>`
+                : `<span class="summary-locked-note">Locked &mdash; already reviewed, editable only by a superuser.</span>`;
+
+            document.getElementById('sample-summary').innerHTML = `
+                <div class="summary-box">
+                    <div class="summary-header">
+                        <span class="summary-title">${sample.samplingLocation || 'Unnamed location'}</span>
+                        <span class="event-id">${sample.eventID}</span>
+                    </div>
+                    ${rows}
+                    <div class="card-actions">
+                        ${editControl}
+                        <button type="button" class="small secondary" onclick='resumeSample(${sampleJson})'>Add another observation</button>
+                        <button type="button" class="small secondary" onclick='useAsTemplate(${sampleJson})'>Use as template for new sample</button>
+                        ${allPending ? `<button type="button" class="small danger" onclick="withdrawSample('${sample.eventID}')">Withdraw whole sample</button>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function showSampleSummary(sample) {
+            document.getElementById('sample-form').style.display = 'none';
+            document.getElementById('sample-summary').style.display = 'block';
+            renderSampleSummary(sample);
+        }
+
+        function showSampleForm(isEditing) {
+            document.getElementById('sample-form').style.display = 'block';
+            document.getElementById('sample-summary').style.display = 'none';
+            document.getElementById('sample-form-submit-btn').textContent = isEditing ? 'Save changes' : 'Create sample';
+            document.getElementById('sample-cancel-btn').style.display = isEditing ? 'none' : 'inline-block';
+            document.getElementById('sample-cancel-edit-btn').style.display = isEditing ? 'inline-block' : 'none';
+        }
 
         document.getElementById('sample-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const statusEl = document.getElementById('sample-status');
             statusEl.innerHTML = '';
+
+            const isEditingSample = !!editingSampleEventId;
 
             const samplesizeValue = parseFloatOrNull(document.getElementById('f-samplesize-value').value);
             const samplesizeUnit = document.getElementById('f-samplesize-unit').value.trim() || null;
@@ -870,27 +963,44 @@
                 eventRemarks: document.getElementById('f-remarks').value || null,
                 datarestricted: dataRestricted ? 'Y' : 'N',
                 licenceHolder: licenceHolder,
-                dataSource: document.getElementById('f-datasource-notes').value || null,
-                sourceCategory: document.getElementById('f-source-category').value || null,
-                sourceLiteratureID: selectedSourceLiteratureID,
-                sourceProjectID: selectedSourceProjectID,
-                sourceOtherDetail: document.getElementById('source-other-detail').value || null,
             };
+            if (!isEditingSample) {
+                payload.dataSource = document.getElementById('f-datasource-notes').value || null;
+                payload.sourceCategory = document.getElementById('f-source-category').value || null;
+                payload.sourceLiteratureID = selectedSourceLiteratureID;
+                payload.sourceProjectID = selectedSourceProjectID;
+                payload.sourceOtherDetail = document.getElementById('source-other-detail').value || null;
+            }
+
+            const url = isEditingSample ? `/api/v1/submit/sample/${editingSampleEventId}` : '/api/v1/submit/sample';
+            const method = isEditingSample ? 'PUT' : 'POST';
 
             try {
-                const res = await fetch('/api/v1/submit/sample', {
-                    method: 'POST',
+                const res = await fetch(url, {
+                    method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || 'Could not create sample');
+                if (!res.ok) throw new Error(data.detail || `Could not ${isEditingSample ? 'save' : 'create'} sample`);
 
-                activeEventId = data.eventID;
-                statusEl.innerHTML = `<div class="status-message success">Sample created (${data.eventID}). Now add species below.</div>`;
-                document.getElementById('active-event-id-label').textContent = activeEventId;
+                const eventId = isEditingSample ? editingSampleEventId : data.eventID;
+                const summarySample = {
+                    ...payload,
+                    eventID: eventId,
+                    observations: isEditingSample ? (editingSampleSnapshot.observations || []) : []
+                };
+
+                activeEventId = eventId;
+                editingSampleEventId = null;
+                editingSampleSnapshot = null;
+
+                showSampleSummary(summarySample);
+                document.getElementById('active-event-id-label').textContent = eventId;
                 document.getElementById('add-observation-panel').style.display = 'block';
-                document.getElementById('add-observation-panel').scrollIntoView({ behavior: 'smooth' });
+                if (!isEditingSample) {
+                    document.getElementById('add-observation-panel').scrollIntoView({ behavior: 'smooth' });
+                }
                 loadMySamples();
             } catch (err) {
                 statusEl.innerHTML = `<div class="status-message error">${err.message}</div>`;
@@ -910,12 +1020,22 @@
             }
         }
 
+        function cancelEditSample() {
+            if (!editingSampleEventId || !editingSampleSnapshot) return;
+            showSampleSummary(editingSampleSnapshot);
+            editingSampleEventId = null;
+            editingSampleSnapshot = null;
+        }
+
         function parseFloatOrNull(v) { return v === '' ? null : parseFloat(v); }
         function parseIntOrNull(v) { return v === '' ? null : parseInt(v, 10); }
 
         function finishSample() {
             activeEventId = null;
+            editingSampleEventId = null;
+            editingSampleSnapshot = null;
             document.getElementById('add-observation-panel').style.display = 'none';
+            showSampleForm(false);
             document.getElementById('sample-form').reset();
             shadeWidgetHandle.reset();
             currentShadeCode = null;
@@ -923,22 +1043,32 @@
             document.getElementById('f-licenceholder-field').style.display = 'none';
             resetSourcePicker();
             document.getElementById('sample-status').innerHTML = '';
+
+            // Clear any in-progress observation/demographics state so it
+            // doesn't carry over into the next sample entered.
+            currentObservationID = null;
+            document.getElementById('observation-form').reset();
+            selectedTaxonId = null;
+            document.getElementById('obs-taxon-selected').textContent = '';
+            showObservationForm(false);
+            document.getElementById('new-obs-demographics').innerHTML = '';
+            document.getElementById('observation-status').innerHTML = '';
+            document.getElementById('btn-new-observation').style.display = 'none';
+
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        // Lets a card in "Your submissions" set this as the active sample,
-        // so the contributor can add more species to something they
-        // already started, without retyping the sample details
-        function resumeSample(eventId) {
-            activeEventId = eventId;
-            document.getElementById('active-event-id-label').textContent = eventId;
+        // Lets a card set this as the active sample, showing it as a
+        // locked summary above the observation panel, so the
+        // contributor can add more species without retyping details.
+        function resumeSample(sample) {
+            activeEventId = sample.eventID;
+            showSampleSummary(sample);
+            document.getElementById('active-event-id-label').textContent = sample.eventID;
             document.getElementById('add-observation-panel').style.display = 'block';
             document.getElementById('add-observation-panel').scrollIntoView({ behavior: 'smooth' });
         }
 
-        // Copies a previous sample's field values into the "new sample"
-        // form as a starting point, since there's no true in-place editing
-        // yet - this at least avoids retyping everything from scratch.
         function ensureOptionExists(selectEl, value) {
             if (!value) return;
             const exists = Array.from(selectEl.options).some(o => o.value === value);
@@ -951,7 +1081,7 @@
             selectEl.value = value;
         }
 
-        function useAsTemplate(sample) {
+        function populateSampleFormFields(sample) {
             document.getElementById('f-location').value = sample.samplingLocation || '';
             document.getElementById('f-lat').value = sample.decimalLatitude ?? '';
             document.getElementById('f-lng').value = sample.decimalLongitude ?? '';
@@ -970,6 +1100,22 @@
             document.getElementById('f-licenceholder-field').style.display = restricted ? 'flex' : 'none';
             document.getElementById('f-licenceholder').value = sample.licenceHolder || '';
             document.getElementById('f-remarks').value = sample.eventRemarks || '';
+        }
+
+        // Copies a previous sample's field values into a brand-new
+        // sample form - starting fresh, not tied to the source sample.
+        function useAsTemplate(sample) {
+            editingSampleEventId = null;
+            editingSampleSnapshot = null;
+            activeEventId = null;
+            document.getElementById('add-observation-panel').style.display = 'none';
+            resetSourcePicker();
+            shadeWidgetHandle.reset();
+            currentShadeCode = null;
+
+            showSampleForm(false);
+            document.getElementById('sample-form').reset();
+            populateSampleFormFields(sample);
             // SHADe is deliberately NOT copied - it's specific to the exact
             // microhabitat of the original sample and should be re-built
             // for the new one, not silently reused.
@@ -978,11 +1124,23 @@
                 `<div class="status-message success">Fields copied from a previous sample. Check them over, then create.</div>`;
         }
 
+        // Switches the sample form into "editing an already-submitted
+        // sample" mode, pre-filled from the locked summary.
+        function beginEditSample(sample) {
+            editingSampleEventId = sample.eventID;
+            editingSampleSnapshot = sample;
+            showSampleForm(true);
+            document.getElementById('sample-form').reset();
+            populateSampleFormFields(sample);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
         // ==================================================
         // OBSERVATION FORM (taxon search + submit)
         // ==================================================
         let selectedTaxonId = null;
         let currentObservationID = null;
+		let currentObservationSnapshot = null;
         const obsSearchBox = document.getElementById('obs-taxon-search');
         const obsDropdown = document.getElementById('obs-taxon-dropdown');
         let obsSearchTimer = null;
@@ -1074,12 +1232,9 @@
 
                 currentObservationID = data.observationID || currentObservationID;
                 const taxonName = obsSearchBox.value || 'this species';
+                currentObservationSnapshot = { ...payload, observationID: currentObservationID, taxonLabel: taxonName };
 
-                statusEl.innerHTML = isEditing
-                    ? `<div class="status-message success">Updated.</div>`
-                    : `<div class="status-message success">Added. You can add demographic detail below, edit the identification above, or add another species once you're done here.</div>`;
-
-                setObservationSavedState(taxonName);
+                showObservationSummary(currentObservationSnapshot);
                 document.getElementById('btn-new-observation').style.display = 'inline-block';
 
                 if (!isEditing) {
@@ -1097,34 +1252,75 @@
             }
         });
 
-        function setObservationSavedState(taxonLabel) {
-            document.getElementById('observation-form').querySelectorAll('input, select, textarea').forEach(el => el.disabled = true);
-            document.getElementById('observation-form-submit-btn').style.display = 'none';
-            document.getElementById('observation-saved-banner').style.display = 'block';
-            document.getElementById('observation-saved-banner-text').textContent = `✓ Observation saved: ${taxonLabel}`;
+        function populateObservationFormFields(snap) {
+            selectedTaxonId = snap.taxonID;
+            obsSearchBox.value = snap.taxonLabel;
+            document.getElementById('obs-taxon-selected').textContent = `Selected: ${snap.taxonLabel} (taxonID ${snap.taxonID})`;
+            document.getElementById('obs-identifiedby').value = snap.identifiedBy || '';
+            document.getElementById('obs-verification').value = snap.identificationVerificationStatus || '';
+            document.getElementById('obs-basis').value = snap.basisOfRecord || '';
+            document.getElementById('obs-technique').value = snap.idTechnique || '';
+            document.getElementById('obs-idtext').value = snap.idText || '';
         }
 
-        function setObservationEditableState() {
-            document.getElementById('observation-form').querySelectorAll('input, select, textarea').forEach(el => el.disabled = false);
-            const btn = document.getElementById('observation-form-submit-btn');
-            btn.style.display = '';
-            btn.textContent = currentObservationID ? 'Save changes' : 'Add this observation';
-            document.getElementById('observation-saved-banner').style.display = 'none';
+        function renderObservationSummary(snap) {
+            const rows = [
+                fieldRow('Identified by', snap.identifiedBy),
+                fieldRow('Confidence', snap.identificationVerificationStatus),
+                fieldRow('Basis of record', snap.basisOfRecord),
+                fieldRow('Identification technique', snap.idTechnique),
+                fieldRow('Notes', snap.idText),
+            ].join('');
+            document.getElementById('observation-summary').innerHTML = `
+                <div class="summary-box">
+                    <div class="summary-header">
+                        <span class="summary-title" style="font-style:italic;">${snap.taxonLabel}</span>
+                        <span class="event-id">${snap.observationID}</span>
+                    </div>
+                    ${rows}
+                    <div class="card-actions">
+                        <button type="button" class="small" onclick="beginEditObservation()">Edit</button>
+                    </div>
+                </div>
+            `;
         }
 
-        document.getElementById('btn-edit-observation').addEventListener('click', setObservationEditableState);
+        function showObservationSummary(snap) {
+            document.getElementById('observation-form').style.display = 'none';
+            document.getElementById('observation-summary').style.display = 'block';
+            renderObservationSummary(snap);
+        }
+
+        function showObservationForm(isEditing) {
+            document.getElementById('observation-form').style.display = 'block';
+            document.getElementById('observation-summary').style.display = 'none';
+            document.getElementById('observation-form-submit-btn').textContent = isEditing ? 'Save changes' : 'Add this observation';
+            document.getElementById('obs-cancel-edit-btn').style.display = isEditing ? 'inline-block' : 'none';
+        }
+
+        function beginEditObservation() {
+            if (!currentObservationSnapshot) return;
+            showObservationForm(true);
+            populateObservationFormFields(currentObservationSnapshot);
+        }
+
+        function cancelEditObservation() {
+            if (!currentObservationSnapshot) return;
+            showObservationSummary(currentObservationSnapshot);
+        }
 
         document.getElementById('btn-new-observation').addEventListener('click', () => {
             currentObservationID = null;
+            currentObservationSnapshot = null;
             document.getElementById('observation-form').reset();
             selectedTaxonId = null;
             document.getElementById('obs-taxon-selected').textContent = '';
-            setObservationEditableState();
-            document.getElementById('observation-form-submit-btn').textContent = 'Add this observation';
+            showObservationForm(false);
             document.getElementById('new-obs-demographics').innerHTML = '';
             document.getElementById('observation-status').innerHTML = '';
             document.getElementById('btn-new-observation').style.display = 'none';
         });
+
 
         // ==================================================
         // DEMOGRAPHICS & SPECIMENS BUILDER
@@ -1389,7 +1585,8 @@
             try {
                 const res = await fetch('/api/v1/submit/my-samples');
                 const data = await res.json();
-
+				console.log('my-samples response:', data);
+				
                 if (!data.samples || data.samples.length === 0) {
                     listEl.innerHTML = '<p class="no-samples-message">You haven\'t submitted anything yet.</p>';
                     return;
@@ -1432,7 +1629,7 @@
                         </div>
                         <div id="obs-list-${sample.eventID}">${obsHtml}</div>
                         <div class="card-actions">
-                            <button class="small secondary" onclick='resumeSample("${sample.eventID}")'>Add another observation</button>
+                            <button class="small secondary" onclick='resumeSample(${JSON.stringify(sample).replace(/'/g, "&apos;")})'>Add another observation</button>
                             <button class="small secondary" onclick='useAsTemplate(${JSON.stringify(sample).replace(/'/g, "&apos;")})'>Use as template for new sample</button>
                             ${allPending ? `<button class="small danger" onclick="withdrawSample('${sample.eventID}')">Withdraw whole sample</button>` : ''}
                         </div>
@@ -1450,8 +1647,9 @@
                     });
                 });
             } catch (err) {
-                listEl.innerHTML = '<p class="no-samples-message">Could not load your submissions.</p>';
-            }
+				console.error('loadMySamples failed:', err);
+				listEl.innerHTML = '<p class="no-samples-message">Could not load your submissions.</p>';
+			}
         }
 
         async function withdrawObservation(observationId) {
