@@ -876,3 +876,19 @@ A "click on map" location selector was added to the submit.html "add sample" det
 
 The submit sample workflow was cleaned up so that information on a submitted sample remains visible in a panel above the observations being entered, and similarly observations remain visible in a similar panel while demongraphic or specimen infomration is entered, to make it clearer which sample or observation is being added to.
 this involved changes to submit.html and to main.py
+
+## Setting up a "My Submissions" page for users to view and manage their submitted data
+
+This required a revision to how the system handles submitted data, to give each entry a draft, submitted or verified status, which allow different actions to be carried out.  Drafts can be edited, but aren't mapped or viewable by other users (except super users), submitted data becomes mappable and viewable and is flagged for review by superusers, but can still be withdrawn and edited if validation hasn't occurred.  Validated data can't be withdrawn or edited except by superusers.  The "My Submissions" page will display 2 tabs, one for samples and the other for observations with demographic calculated summary details.  Long form free text fields won't be displayed in this spreadsheet view.
+
+To effect this, a new script DRAFT / SUBMITTED LIFECYCLE was added to main.py directly after the existing submission endpoints (after withdraw_sample), and the old withdraw_observation and withdraw_sample functions were deleted, as they were replaced by a new delete_draft_observation / delete_draft_sample.
+Then small patches listed in PATCHES.txt were applied.
+
+Two separate types of information are used to track the lifecycle of data through this system, which have been deliberately kept apart:
+* record_status: may be 'draft' or 'submitted'   (the contributor's workflow)
+* verification_status the superuser REVIEW outcome, unchanged:
+       * 'unverified' = never queued for review (legacy data, drafts)
+       * 'pending'    = submitted and waiting in the review queue
+       * 'queried' / 'verified' / 'rejected' / 'unverifiable' = decisions
+
+A contributor may change a record only while its review outcome is unverified, pending or queried. Once a superuser has accepted, rejected or marked it unverifiable, it is locked. Only records whose ID starts "WEB-" can be changed by their contributor - historic imported records are superuser-edit only, so nobody can accidentally withdraw a legacy record from public view.
