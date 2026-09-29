@@ -881,8 +881,15 @@ this involved changes to submit.html and to main.py
 
 This required a revision to how the system handles submitted data, to give each entry a draft, submitted or verified status, which allow different actions to be carried out.  Drafts can be edited, but aren't mapped or viewable by other users (except super users), submitted data becomes mappable and viewable and is flagged for review by superusers, but can still be withdrawn and edited if validation hasn't occurred.  Validated data can't be withdrawn or edited except by superusers.  The "My Submissions" page will display 2 tabs, one for samples and the other for observations with demographic calculated summary details.  Long form free text fields won't be displayed in this spreadsheet view.
 
-To effect this, a new script DRAFT / SUBMITTED LIFECYCLE was added to main.py directly after the existing submission endpoints (after withdraw_sample), and the old withdraw_observation and withdraw_sample functions were deleted, as they were replaced by a new delete_draft_observation / delete_draft_sample.
-Then small patches listed in PATCHES.txt were applied.
+To effect this, A migration [Migration-15draft-submittedlifecycleforsamples&observations.sql](Migration-15draft-submittedlifecycleforsamples&observations.sql) was run on the database to add record_status columns (in addition to verification status) to observations and samples tables.  All existing data was marked as "submitted" and qc flags were added to warn users or superusers of issues from automated QC checks of sample issues.
+
+a new script DRAFT / SUBMITTED LIFECYCLE was added to main.py directly after the existing submission endpoints (after withdraw_sample), and the old withdraw_observation and withdraw_sample functions were deleted, as they were replaced by a new delete_draft_observation / delete_draft_sample.
+
+The script inserted into main.py contained:
+* assert_can_modify_sample and assert_can_modify_observation, the shared locking rules.
+* Submit-sample (with all its draft observations by default), submit-observation and both withdraw-to-draft endpoints.
+* Draft-only delete endpoints that refuse if the record still contains children, matching the catches you already have.
+* A first set of automated sample checks. These, so far, are for hard errors (invalid or swapped coordinates, future dates, earliest date after latest) and warnings (no coordinates, outside the British Isles, dates before 1700). Future versions of check may include sea/land check to match habitat information, grid-ref agreement and place-name consistency with other samples already in database.
 
 Two separate types of information are used to track the lifecycle of data through this system, which have been deliberately kept apart:
 * record_status: may be 'draft' or 'submitted'   (the contributor's workflow)
@@ -892,3 +899,7 @@ Two separate types of information are used to track the lifecycle of data throug
        * 'queried' / 'verified' / 'rejected' / 'unverifiable' = decisions
 
 A contributor may change a record only while its review outcome is unverified, pending or queried. Once a superuser has accepted, rejected or marked it unverifiable, it is locked. Only records whose ID starts "WEB-" can be changed by their contributor - historic imported records are superuser-edit only, so nobody can accidentally withdraw a legacy record from public view.
+
+Queried observations stay editable by their contributor. A reviewer's "please clarify" will let the recorder fix and resubmit. Accepted, rejected and unverifiable ones are locked.
+
+Then small patches listed in PATCHES.txt were applied.
