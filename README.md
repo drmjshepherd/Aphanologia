@@ -902,4 +902,17 @@ A contributor may change a record only while its review outcome is unverified, p
 
 Queried observations stay editable by their contributor. A reviewer's "please clarify" will let the recorder fix and resubmit. Accepted, rejected and unverifiable ones are locked.
 
-Then small patches listed in PATCHES.txt were applied.
+Some additional tweaks were made so that samples are NOT subject to draft status - they are created by contributors and can be edited by that contributor or a superuser subsequently.  Contributors cannot delete samples, but super users can, but only if all their observations have been  moved or reassigned.  The submit.html panel was redesigned to temporarily list all the samples from a contributor at the bottom of the submit page, with sample details and observation detailes retreievable from this list to be displayed at the top of the page.  Existing samples viewed in this way can have observations added to them with a panel for adding observations appearing tot he right of the sample panel, and new observations being added to the bottom of the list - we will eveutally move this to the top and streamline the options for adding demographics into a button on the "add observation" panel.  At the moment the demographic panel opens automatically under an added observation (not always needed).
+
+### Developing a "My submissions" page
+
+The page was developed with two tabs, Samples and Observations, each showing one page of rows at a time. The server does the paging, sorting, searching and filtering, so it will stay fast when you have thousands of records. You can choose 10, 25, 50 or 100 rows per page, and each tab remembers its own sort, search and filter.
+Samples columns: ID, location, coordinates, earliest and latest date, habitat, recorded by, number of observations, number of drafts, status and date entered. Long text fields are left out.
+Observations columns: ID, sample, species, location, identified by, basis of record, total count, a demographics summary (such as "2 female adult, 3 nymph"), status and date entered.
+Filters:
+Samples: all, with drafts, empty, or draft.
+Observations: draft, awaiting review, unverified, queried, verified, rejected, or unverifiable.
+Selecting a row enables View, Edit, Submit for review and Withdraw to draft for observations, and Submit N drafts for review for samples. Buttons grey out when the record can't be changed. There's no delete, as you decided.
+View and Edit open the submit page with that sample or observation already loaded. This involv one addition to submit.html, so it can read the sample from the web address.
+The button on the landing page shows for contributors, superusers and hyperusers, and stays hidden from everyone else.
+
