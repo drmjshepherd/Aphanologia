@@ -603,7 +603,7 @@ from fastapi.responses import FileResponse
 # to proper cloud storage later, only this function needs to change -
 # every URL the website already generated will keep working exactly
 # as before.
-MEDIA_ROOT = r"C:\path\to\folder\Mesofauna Image Archive"
+MEDIA_ROOT = r"C:\Users\Matth\OneDrive\Soil Biodiversity UK\Mesofauna Image Archive"
 
 @app.get("/api/v1/media/{media_id}")
 def get_media_file(media_id: int = Path(..., description="The media_id from observation_media")):
@@ -1155,27 +1155,37 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
     """
     Creates a new sample (sampling event) submitted via the website.
     Gets a WEB-prefixed eventID so it can never collide with
-    historic imported data. Starts as belongs-to-this-user, pending
-    review - observations can then be added to it one at a time via
+    historic imported data. Samples are live as soon as they are
+    saved (there is no review or draft stage for samples) - instead
+    the automated checks run here: hard errors stop the save, and
+    warnings are stored in qc_flags for superusers to look at.
+    Observations can then be added to it one at a time via
     /api/v1/submit/observation, using the returned eventID.
     """
     if payload.samplesizeValue is not None and not (payload.samplesizeUnit and payload.samplesizeUnit.strip()):
         raise HTTPException(status_code=400, detail="samplesizeUnit is required whenever samplesizeValue is given")
     if payload.datarestricted == "Y" and not (payload.licenceHolder and payload.licenceHolder.strip()):
         raise HTTPException(status_code=400, detail="licenceHolder is required when datarestricted is 'Y'")
-
+ 
+    # Automated checks (defined further down main.py, in the lifecycle block)
+    check_errors, check_warnings = run_sample_checks({
+        "decimalLatitude": payload.decimalLatitude,
+        "decimalLongitude": payload.decimalLongitude,
+        "earliestDateCollected": payload.earliestDateCollected,
+        "latestDateCollected": payload.latestDateCollected,
+    })
+    if check_errors:
+        raise HTTPException(status_code=400, detail="Please fix: " + "; ".join(check_errors))
+ 
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT nextval('web_eventid_seq');")
         new_id = f"WEB-{cursor.fetchone()['nextval']}"
-
-        # Compose the dataSource[free text] summary. Historic rows in
-        # this column hold plain descriptive text (e.g. "A.N. Other
-        # personal collection") - new rows follow the same
-        # spirit, built from the structured category/link the
-        # contributor picked, so the column stays readable at a glance
-        # even though the real link now lives in a junction table.
+ 
+        # Compose the dataSource[free text] summary (see the original
+        # comments: historic rows hold plain descriptive text, new rows
+        # follow the same spirit, built from the structured category/link).
         data_source_summary = payload.sourceCategory or None
         if payload.sourceCategory == "Published literature" and payload.sourceLiteratureID:
             cursor.execute("""
@@ -1192,15 +1202,10 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
                 data_source_summary = f"Formal project or survey: {proj_row['project_name']}"
         elif payload.sourceOtherDetail:
             data_source_summary = f"{payload.sourceCategory}: {payload.sourceOtherDetail}" if payload.sourceCategory else payload.sourceOtherDetail
-
-        # The person's own free-text "Data source notes" are
-        # deliberately supplementary, not a replacement - it's always
-        # appended to the structured summary above, never overwrites
-        # it, since the real traceable link (if any) is the
-        # sourceCategory + literature/project junction row, not this text.
+ 
         if payload.dataSource and payload.dataSource.strip():
             data_source_summary = f"{data_source_summary} - {payload.dataSource.strip()}" if data_source_summary else payload.dataSource.strip()
-
+ 
         cursor.execute("""
             INSERT INTO samples (
                 "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
@@ -1220,10 +1225,14 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
             payload.datarestricted, payload.licenceHolder, data_source_summary,
             user["user_id"], user["display_name"]
         ))
-
-        # Link to the specific literature reference or project, if one
-        # was chosen - this is what actually makes the source
-        # queryable/traceable later, not just descriptive text.
+ 
+        # Mark as submitted (live) and store any warnings from the checks
+        cursor.execute("""
+            UPDATE samples
+            SET record_status = 'submitted', submitted_at = CURRENT_TIMESTAMP, qc_flags = %s::jsonb
+            WHERE "eventID" = %s;
+        """, (json.dumps(check_warnings) if check_warnings else None, new_id))
+ 
         if payload.sourceCategory == "Published literature" and payload.sourceLiteratureID:
             cursor.execute("""
                 INSERT INTO sample_literature_junction ("eventID", "Type", "litID")
@@ -1234,18 +1243,17 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
                 INSERT INTO sample_project_junction ("eventID", project_id, type)
                 VALUES (%s, %s, %s);
             """, (new_id, payload.sourceProjectID, "source of record"))
-
-        # Build the spatial point immediately, if coordinates were given,
-        # so this sample behaves identically to imported data on the map
+ 
         if payload.decimalLatitude is not None and payload.decimalLongitude is not None:
             cursor.execute("""
                 UPDATE samples
                 SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s, %s), 4326)
                 WHERE "eventID" = %s;
             """, (payload.decimalLongitude, payload.decimalLatitude, new_id))
-
+ 
         conn.commit()
-        return {"eventID": new_id, "message": "Sample created. Add observations to it using this eventID."}
+        return {"eventID": new_id, "warnings": check_warnings,
+                "message": "Sample saved. You can now add observations to it."}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Could not create sample: {str(e)}")
@@ -1256,47 +1264,39 @@ def submit_sample(payload: SampleSubmission, user: dict = Depends(require_contri
 @app.put("/api/v1/submit/sample/{event_id}")
 def edit_own_sample(event_id: str, payload: SampleSelfEditSubmission, user: dict = Depends(require_contributor)):
     """
-    Lets a contributor edit their own sample's details, PROVIDED every
-    observation currently attached to it (if any) is still pending
-    review - the same "still in the recorder's hands" boundary used
-    for withdrawal (see withdraw_sample) and for self-editing an
-    observation. Once a superuser has reviewed anything under this
-    sample, it's frozen here and can only be edited through the
-    superuser record editor (edit_sample).
+    Lets a contributor edit their own sample's details, provided it is
+    a web-submitted sample and no observation in it has been reviewed
+    by a superuser yet. Once anything in it has been reviewed, it can
+    only be edited through the superuser record editor. The same
+    automated checks as on creation run here.
     """
     if payload.samplesizeValue is not None and not (payload.samplesizeUnit and payload.samplesizeUnit.strip()):
         raise HTTPException(status_code=400, detail="samplesizeUnit is required whenever samplesizeValue is given")
     if payload.datarestricted == "Y" and not (payload.licenceHolder and payload.licenceHolder.strip()):
         raise HTTPException(status_code=400, detail="licenceHolder is required when datarestricted is 'Y'")
-
+ 
+    check_errors, check_warnings = run_sample_checks({
+        "decimalLatitude": payload.decimalLatitude,
+        "decimalLongitude": payload.decimalLongitude,
+        "earliestDateCollected": payload.earliestDateCollected,
+        "latestDateCollected": payload.latestDateCollected,
+    })
+    if check_errors:
+        raise HTTPException(status_code=400, detail="Please fix: " + "; ".join(check_errors))
+ 
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT submitted_by_user_id FROM samples WHERE "eventID" = %s;', (event_id,))
-        sample = cursor.fetchone()
-        if not sample:
-            raise HTTPException(status_code=404, detail="No such sample")
-        if sample["submitted_by_user_id"] != user["user_id"]:
-            raise HTTPException(status_code=403, detail="You can only edit your own submitted samples")
-
-        cursor.execute("""
-            SELECT COUNT(*) AS non_pending_count
-            FROM observations
-            WHERE "eventID" = %s AND verification_status != 'pending';
-        """, (event_id,))
-        if cursor.fetchone()["non_pending_count"] > 0:
-            raise HTTPException(
-                status_code=409,
-                detail="This sample has already been reviewed and can no longer be edited here"
-            )
-
+        assert_can_modify_sample(cursor, event_id, user)
+ 
         cursor.execute("""
             UPDATE samples SET
                 "samplingLocation" = %s, "decimalLatitude" = %s, "decimalLongitude" = %s,
                 "coordinateuncertaintyinmeters" = %s, "earliestDateCollected" = %s, "latestDateCollected" = %s,
                 "habitat" = %s, "microhabitat" = %s, "SHADe" = %s, "samplingProtocol" = %s,
                 "samplesizeValue" = %s, "samplesizeUnit" = %s, "recordedBy" = %s, "eventRemarks" = %s,
-                "datarestricted" = %s, "licenceHolder" = %s
+                "datarestricted" = %s, "licenceHolder" = %s,
+                qc_flags = %s::jsonb
             WHERE "eventID" = %s;
         """, (
             payload.samplingLocation, payload.decimalLatitude, payload.decimalLongitude,
@@ -1304,9 +1304,10 @@ def edit_own_sample(event_id: str, payload: SampleSelfEditSubmission, user: dict
             payload.habitat, payload.microhabitat, payload.SHADe, payload.samplingProtocol,
             payload.samplesizeValue, payload.samplesizeUnit, payload.recordedBy, payload.eventRemarks,
             payload.datarestricted, payload.licenceHolder,
+            json.dumps(check_warnings) if check_warnings else None,
             event_id
         ))
-
+ 
         if payload.decimalLatitude is not None and payload.decimalLongitude is not None:
             cursor.execute("""
                 UPDATE samples SET geom_wgs84 = ST_SetSRID(ST_MakePoint(%s, %s), 4326)
@@ -1314,9 +1315,9 @@ def edit_own_sample(event_id: str, payload: SampleSelfEditSubmission, user: dict
             """, (payload.decimalLongitude, payload.decimalLatitude, event_id))
         else:
             cursor.execute('UPDATE samples SET geom_wgs84 = NULL WHERE "eventID" = %s;', (event_id,))
-
+ 
         conn.commit()
-        return {"eventID": event_id, "message": "Saved."}
+        return {"eventID": event_id, "warnings": check_warnings, "message": "Saved."}
     except HTTPException:
         conn.rollback()
         raise
@@ -2494,7 +2495,9 @@ def submit_observation(payload: ObservationSubmission, user: dict = Depends(requ
             raise HTTPException(status_code=404, detail="No such sample (eventID)")
         if sample["submitted_by_user_id"] != user["user_id"]:
             raise HTTPException(status_code=403, detail="You can only add observations to your own submitted samples")
-
+        if not str(payload.eventID).startswith("WEB-"):
+            raise HTTPException(status_code=403, detail="Observations can only be added to your own web-submitted samples")
+            
         cursor.execute("SELECT nextval('web_observationid_seq');")
         new_id = f"WEB-{cursor.fetchone()['nextval']}"
 
@@ -2503,9 +2506,9 @@ def submit_observation(payload: ObservationSubmission, user: dict = Depends(requ
                 "observationID", "eventID", "taxonID", "identifiedBy",
                 "identificationVerificationStatus", "identificationRemarks",
                 "basisOfRecord", "idTechnique", "idText[free_text]",
-                verification_status, submitted_by_user_id, entered_by, entered_at
+                verification_status, submitted_by_user_id, entered_by, entered_at, record_status
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s, CURRENT_TIMESTAMP
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, 'unverified', %s, %s, CURRENT_TIMESTAMP, 'draft'
             );
         """, (
             new_id, payload.eventID, payload.taxonID, payload.identifiedBy,
@@ -2514,7 +2517,7 @@ def submit_observation(payload: ObservationSubmission, user: dict = Depends(requ
             user["user_id"], user["display_name"]
         ))
         conn.commit()
-        return {"observationID": new_id, "eventID": payload.eventID, "status": "pending"}
+        return {"observationID": new_id, "eventID": payload.eventID, "status": "draft"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2543,10 +2546,8 @@ def edit_own_observation(observation_id: str, payload: ObservationSelfEditSubmis
         current = cursor.fetchone()
         if not current:
             raise HTTPException(status_code=404, detail="No such observation")
-        if current["submitted_by_user_id"] != user["user_id"]:
-            raise HTTPException(status_code=403, detail="You can only edit your own submitted observations")
-        if current["verification_status"] != "pending":
-            raise HTTPException(status_code=409, detail="This observation has already been reviewed and can no longer be edited here")
+        
+        assert_can_modify_observation(current, user)
 
         cursor.execute('SELECT 1 FROM taxonomy WHERE "taxonID" = %s;', (payload.taxonID,))
         if not cursor.fetchone():
@@ -2588,12 +2589,11 @@ def submit_demographic(payload: DemographicSubmission, user: dict = Depends(requ
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT submitted_by_user_id FROM observations WHERE "observationID" = %s;', (payload.observationID,))
+        cursor.execute('SELECT "observationID", submitted_by_user_id, verification_status FROM observations WHERE "observationID" = %s;', (payload.observationID,))
         obs = cursor.fetchone()
         if not obs:
             raise HTTPException(status_code=404, detail="No such observation (observationID)")
-        if obs["submitted_by_user_id"] != user["user_id"]:
-            raise HTTPException(status_code=403, detail="You can only add demographic details to your own submitted observations")
+        assert_can_modify_observation(obs, user)
 
         cursor.execute("SELECT nextval('web_demographicid_seq');")
         new_id = f"WEB-{cursor.fetchone()['nextval']}"
@@ -2637,7 +2637,7 @@ def submit_specimen(payload: SpecimenSubmission, user: dict = Depends(require_co
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT o.submitted_by_user_id
+            SELECT o."observationID", o.submitted_by_user_id, o.verification_status
             FROM observation_demographics d
             JOIN observations o ON d."observationID" = o."observationID"
             WHERE d."demographicID" = %s;
@@ -2699,26 +2699,19 @@ def list_my_pending(user: dict = Depends(require_contributor)):
         cursor.close()
         conn.close()
 
-
+# ------------------------------------------------------------------
+# Lists samples, also returns the observation fields the page needs for editing
+#  an observation, each observation's record_status, and the sample's
+#  record_status and automatic-check flags)
+# ------------------------------------------------------------------
 @app.get("/api/v1/submit/my-samples")
 def list_my_samples(user: dict = Depends(require_contributor)):
     """
-    Lists every sample the logged-in user has submitted (regardless of
-    whether its observations are still pending, or already reviewed),
-    with that sample's own observations nested inside it under
-    "observations" - and each observation's own demographic groups
-    nested under IT as "demographics", each of which has its own
-    specimen records nested as "specimens". Unlike /my-pending (which
-    returns a flat list of observations only, with no sample-level
-    details), this gives the submission page everything it needs to:
-      - show "your submissions" as the full natural tree: sample ->
-        observations -> demographic groups -> specimens
-      - offer "use this sample as a starting point for a new one",
-        since all the sample-level fields are present here to copy
-      - let a contributor add another observation, demographic group,
-        or specimen to something they already started, directly from
-        this list, without needing to remember any of its IDs
-    Only ever returns this user's own samples - never anyone else's.
+    Lists every sample the logged-in user has created, newest first,
+    with each sample's observations nested inside it, each
+    observation's demographic groups nested under that, and each
+    demographic group's specimens nested under that. Only ever
+    returns this user's own samples.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -2730,29 +2723,27 @@ def list_my_samples(user: dict = Depends(require_contributor)):
                 "earliestDateCollected", "latestDateCollected",
                 "habitat", "microhabitat", "SHADe", "samplingProtocol",
                 "samplesizeValue", "samplesizeUnit", "datarestricted", "licenceHolder",
-                "recordedBy", "eventRemarks", entered_at
+                "recordedBy", "eventRemarks", record_status, qc_flags, entered_at
             FROM samples
             WHERE submitted_by_user_id = %s
-            ORDER BY entered_at DESC;
+            ORDER BY entered_at DESC NULLS LAST;
         """, (user["user_id"],))
         samples = cursor.fetchall()
-
+ 
         cursor.execute("""
             SELECT
                 o."observationID", o."eventID", o."taxonID",
-                t."scientificName", o.verification_status, o.entered_at
+                t."scientificName", o.proposed_taxon_name,
+                o."identifiedBy", o."identificationVerificationStatus",
+                o."basisOfRecord", o."idTechnique", o."idText[free_text]" AS "idText",
+                o.record_status, o.verification_status, o.entered_at
             FROM observations o
-            JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
             WHERE o.submitted_by_user_id = %s
             ORDER BY o.entered_at ASC;
         """, (user["user_id"],))
         observations = cursor.fetchall()
-
-        # Demographics and specimens don't record submitted_by_user_id
-        # directly, so we reach them by following observationID (and
-        # then demographicID) back to the observations this user owns -
-        # simplest to just pull every demographic/specimen row attached
-        # to any observation already known to be theirs, from above.
+ 
         observation_ids = [o["observationID"] for o in observations]
         demographics = []
         specimens = []
@@ -2765,7 +2756,7 @@ def list_my_samples(user: dict = Depends(require_contributor)):
                 ORDER BY "demographicID" ASC;
             """, (observation_ids,))
             demographics = cursor.fetchall()
-
+ 
             demographic_ids = [d["demographicID"] for d in demographics]
             if demographic_ids:
                 cursor.execute("""
@@ -2776,139 +2767,261 @@ def list_my_samples(user: dict = Depends(require_contributor)):
                     ORDER BY "specimenID" ASC;
                 """, (demographic_ids,))
                 specimens = cursor.fetchall()
-
-        # Nest specimens under their demographic group...
+ 
         specimens_by_demo = {}
         for spec in specimens:
             specimens_by_demo.setdefault(spec["demographicID"], []).append(spec)
         for demo in demographics:
             demo["specimens"] = specimens_by_demo.get(demo["demographicID"], [])
-
-        # ...then demographic groups (with their specimens already
-        # attached) under their observation...
+ 
         demos_by_obs = {}
         for demo in demographics:
             demos_by_obs.setdefault(demo["observationID"], []).append(demo)
         for obs in observations:
             obs["demographics"] = demos_by_obs.get(obs["observationID"], [])
-
-        # ...then observations (with everything already attached) under
-        # their parent sample, same as before
+ 
         obs_by_event = {}
         for obs in observations:
             obs_by_event.setdefault(obs["eventID"], []).append(obs)
-
         for sample in samples:
             sample["observations"] = obs_by_event.get(sample["eventID"], [])
-
+ 
         return {"samples": samples}
     finally:
         cursor.close()
         conn.close()
 
+ 
 
-@app.delete("/api/v1/submit/observation/{observation_id}")
-def withdraw_observation(observation_id: str, user: dict = Depends(require_contributor)):
+# ==========================================================
+# DRAFT / SUBMITTED LIFECYCLE  (step 1 of the user-management /
+# My Submissions work)
+#
+# Paste this whole block into main.py directly AFTER the existing
+# submission endpoints (after withdraw_sample), and DELETE the old
+# withdraw_observation and withdraw_sample functions - they are
+# replaced by delete_draft_observation / delete_draft_sample below.
+# Then apply the small patches listed in PATCHES.txt.
+#
+# Two separate ideas, deliberately kept apart:
+#   record_status       'draft' | 'submitted'   (the contributor's workflow)
+#   verification_status the superuser REVIEW outcome, unchanged:
+#       'unverified' = never queued for review (legacy data, drafts)
+#       'pending'    = submitted and waiting in the review queue
+#       'queried' / 'verified' / 'rejected' / 'unverifiable' = decisions
+#
+# A contributor may change a record only while its review outcome is
+# unverified, pending or queried. Once a superuser has accepted,
+# rejected or marked it unverifiable, it is locked. Only records whose
+# ID starts "WEB-" can be changed by their contributor - historic
+# imported records are superuser-edit only, so nobody can accidentally
+# withdraw a legacy record from public view.
+# ==========================================================
+import json
+from datetime import date
+
+EDITABLE_REVIEW_STATES = ("unverified", "pending", "queried")
+
+
+def _is_web_id(record_id) -> bool:
+    return str(record_id).startswith("WEB-")
+
+
+def assert_can_modify_observation(obs: dict, user: dict):
+    """obs needs: observationID, submitted_by_user_id, verification_status."""
+    if obs["submitted_by_user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="You can only change your own submissions")
+    if not _is_web_id(obs["observationID"]):
+        raise HTTPException(status_code=403, detail="This is a historic record and can only be changed by a superuser")
+    if obs["verification_status"] not in EDITABLE_REVIEW_STATES:
+        raise HTTPException(status_code=409, detail="This observation has already been reviewed and can no longer be changed here")
+
+
+def assert_can_modify_sample(cursor, event_id: str, user: dict) -> dict:
     """
-    Lets a contributor withdraw (delete) their own observation,
-    but ONLY while it's still pending review - once a superuser has
-    verified it, it can no longer be silently removed this way.
+    Returns the sample row if the user may change it: theirs, a WEB-
+    record, and none of its observations reviewed yet.
+    """
+    cursor.execute("""
+        SELECT "eventID", submitted_by_user_id, record_status
+        FROM samples WHERE "eventID" = %s;
+    """, (event_id,))
+    sample = cursor.fetchone()
+    if not sample:
+        raise HTTPException(status_code=404, detail="No such sample")
+    if sample["submitted_by_user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="You can only change your own submissions")
+    if not _is_web_id(event_id):
+        raise HTTPException(status_code=403, detail="This is a historic record and can only be changed by a superuser")
+    cursor.execute("""
+        SELECT COUNT(*) AS n FROM observations
+        WHERE "eventID" = %s AND verification_status <> ALL(%s);
+    """, (event_id, list(EDITABLE_REVIEW_STATES)))
+    if cursor.fetchone()["n"] > 0:
+        raise HTTPException(status_code=409, detail="A superuser has already reviewed part of this sample, so it can no longer be changed here")
+    return sample
+
+
+def _log_lifecycle(cursor, user: dict, action: str, table: str, record_id: str, changes: dict = None):
+    cursor.execute("""
+        INSERT INTO admin_activity_log (performed_by_user_id, action_type, table_name, record_id, field_changes)
+        VALUES (%s, %s, %s, %s, %s::jsonb);
+    """, (user["user_id"], action, table, record_id, json.dumps(changes) if changes else None))
+
+
+# ----------------------------------------------------------
+# Automated sample checks. Errors block submission; warnings are
+# stored in samples.qc_flags for superusers to see, and shown to the
+# contributor, but never block. More checks (sea/land, grid-ref
+# agreement, place-name consistency) will be added here later.
+# ----------------------------------------------------------
+def _parse_partial_date(text):
+    """Accepts YYYY, YYYY-MM or YYYY-MM-DD; returns a date or None."""
+    if not text:
+        return None
+    t = str(text).strip()
+    try:
+        if len(t) == 4:
+            return date(int(t), 1, 1)
+        if len(t) == 7:
+            return date(int(t[:4]), int(t[5:7]), 1)
+        return date.fromisoformat(t[:10])
+    except ValueError:
+        return None
+
+
+def run_sample_checks(sample: dict):
+    errors, warnings = [], []
+
+    lat = lon = None
+    try:
+        lat = float(sample["decimalLatitude"]) if sample.get("decimalLatitude") not in (None, "") else None
+        lon = float(sample["decimalLongitude"]) if sample.get("decimalLongitude") not in (None, "") else None
+    except ValueError:
+        errors.append("Latitude/longitude are not valid numbers")
+
+    if lat is None or lon is None:
+        warnings.append({"code": "no_coordinates", "message": "No coordinates given, so this sample will not appear on the map"})
+    else:
+        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            errors.append("Latitude or longitude is outside the valid range")
+        elif abs(lat) <= 12 and 49 <= lon <= 61:
+            errors.append("Latitude and longitude look swapped (the 'longitude' is in the range of UK latitudes)")
+        elif not (49.8 <= lat <= 60.9 and -8.7 <= lon <= 1.8):
+            warnings.append({"code": "outside_uk", "message": "Coordinates fall outside the British Isles - please check them"})
+
+    d1 = _parse_partial_date(sample.get("earliestDateCollected"))
+    d2 = _parse_partial_date(sample.get("latestDateCollected"))
+    today = date.today()
+    if sample.get("earliestDateCollected") and d1 is None:
+        errors.append("Earliest date is not a recognisable date (use YYYY, YYYY-MM or YYYY-MM-DD)")
+    if sample.get("latestDateCollected") and d2 is None:
+        errors.append("Latest date is not a recognisable date (use YYYY, YYYY-MM or YYYY-MM-DD)")
+    if d1 and d1 > today or d2 and d2 > today:
+        errors.append("A collection date is in the future")
+    if d1 and d2 and d1 > d2:
+        errors.append("Earliest date is after the latest date")
+    if d1 and d1.year < 1700:
+        warnings.append({"code": "very_old_date", "message": "Collection date is before 1700 - please check"})
+
+    return errors, warnings
+
+
+# ----------------------------------------------------------
+# Submit / withdraw
+# ----------------------------------------------------------
+class SubmitSampleOptions(BaseModel):
+    include_observations: bool = True  # "Submit sample and all its draft observations"
+
+
+@app.post("/api/v1/submit/sample/{event_id}/submit")
+def submit_sample_for_publication(
+    event_id: str,
+    options: SubmitSampleOptions = SubmitSampleOptions(),
+    user: dict = Depends(require_contributor)
+):
+    """
+    Submits a draft sample, making it publicly visible. There is no
+    superuser review of samples - automated checks run instead, and
+    hard errors block submission while warnings are stored as flags.
+    By default every draft observation in the sample is submitted
+    with it (they go into the superuser review queue as 'pending').
+    Safe to call again on an already-submitted sample: it then just
+    submits any newly added draft observations.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        assert_can_modify_sample(cursor, event_id, user)
         cursor.execute("""
-            SELECT submitted_by_user_id, verification_status
-            FROM observations WHERE "observationID" = %s;
-        """, (observation_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="No such observation")
-        if row["submitted_by_user_id"] != user["user_id"]:
-            raise HTTPException(status_code=403, detail="You can only withdraw your own submissions")
-        if row["verification_status"] != "pending":
-            raise HTTPException(status_code=400, detail="Only pending (not yet reviewed) observations can be withdrawn")
+            SELECT "decimalLatitude", "decimalLongitude", "earliestDateCollected", "latestDateCollected"
+            FROM samples WHERE "eventID" = %s;
+        """, (event_id,))
+        errors, warnings = run_sample_checks(cursor.fetchone())
+        if errors:
+            raise HTTPException(status_code=400, detail="Cannot submit yet: " + "; ".join(errors))
 
-        cursor.execute('DELETE FROM observations WHERE "observationID" = %s;', (observation_id,))
+        cursor.execute("""
+            UPDATE samples
+            SET record_status = 'submitted',
+                submitted_at = COALESCE(submitted_at, CURRENT_TIMESTAMP),
+                qc_flags = %s::jsonb
+            WHERE "eventID" = %s;
+        """, (json.dumps(warnings) if warnings else None, event_id))
+
+        submitted_ids = []
+        if options.include_observations:
+            cursor.execute("""
+                UPDATE observations
+                SET record_status = 'submitted',
+                    verification_status = 'pending',
+                    submitted_at = CURRENT_TIMESTAMP
+                WHERE "eventID" = %s AND record_status = 'draft'
+                  AND submitted_by_user_id = %s AND "taxonID" IS NOT NULL
+                RETURNING "observationID";
+            """, (event_id, user["user_id"]))
+            submitted_ids = [r["observationID"] for r in cursor.fetchall()]
+
+        _log_lifecycle(cursor, user, "submit", "samples", event_id, {"observations_submitted": submitted_ids})
         conn.commit()
-        return {"message": "Observation withdrawn"}
+        return {"eventID": event_id, "record_status": "submitted",
+                "observations_submitted": submitted_ids, "warnings": warnings}
     except HTTPException:
+        conn.rollback()
         raise
     except Exception as e:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Could not withdraw: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Could not submit sample: {str(e)}")
     finally:
         cursor.close()
         conn.close()
-        
-@app.delete("/api/v1/submit/sample/{event_id}")
-def withdraw_sample(event_id: str, user: dict = Depends(require_contributor)):
+
+
+@app.post("/api/v1/submit/sample/{event_id}/withdraw")
+def withdraw_sample_to_draft(event_id: str, user: dict = Depends(require_contributor)):
     """
-    Lets a contributor withdraw their own sample, PROVIDED every
-    observation currently attached to it (if any) is still pending
-    review. If even one attached observation has already been
-    verified/queried/rejected by a superuser, the whole withdrawal
-    is refused - nothing reviewed can be silently removed this way.
-    Withdrawing the sample also withdraws any still-pending
-    observations attached to it, and everything genuinely
-    subordinate to those (demographics, their specimens and
-    barcodes, media at any level, literature links, and any
-    taxonomy override), plus the sample's own literature/project
-    links - mirroring the cascade the superuser delete tools use,
-    so nothing is ever left orphaned or blocks the delete with a
-    foreign key error.
+    Returns a submitted sample AND all its observations to draft, so it
+    disappears from public view and the review queue and can be edited.
+    Refused once a superuser has reviewed any observation in it.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT submitted_by_user_id FROM samples WHERE "eventID" = %s;', (event_id,))
-        sample = cursor.fetchone()
-        if not sample:
-            raise HTTPException(status_code=404, detail="No such sample")
-        if sample["submitted_by_user_id"] != user["user_id"]:
-            raise HTTPException(status_code=403, detail="You can only withdraw your own submitted samples")
-
+        assert_can_modify_sample(cursor, event_id, user)
         cursor.execute("""
-            SELECT COUNT(*) AS non_pending_count
-            FROM observations
-            WHERE "eventID" = %s AND verification_status != 'pending';
+            UPDATE observations
+            SET record_status = 'draft', verification_status = 'unverified', submitted_at = NULL
+            WHERE "eventID" = %s;
         """, (event_id,))
-        if cursor.fetchone()["non_pending_count"] > 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot withdraw: this sample has at least one observation that has already been reviewed"
-            )
-
-        cursor.execute('SELECT "observationID" FROM observations WHERE "eventID" = %s;', (event_id,))
-        observation_ids = [r["observationID"] for r in cursor.fetchall()]
-
-        if observation_ids:
-            cursor.execute('SELECT "demographicID" FROM observation_demographics WHERE "observationID" = ANY(%s);', (observation_ids,))
-            demographic_ids = [r["demographicID"] for r in cursor.fetchall()]
-
-            if demographic_ids:
-                cursor.execute('SELECT "specimenID" FROM specimens WHERE "demographicID" = ANY(%s);', (demographic_ids,))
-                specimen_ids = [r["specimenID"] for r in cursor.fetchall()]
-                if specimen_ids:
-                    cursor.execute('DELETE FROM specimen_barcodes WHERE specimen_id = ANY(%s);', (specimen_ids,))
-                    cursor.execute('DELETE FROM observation_media WHERE specimen_id = ANY(%s);', (specimen_ids,))
-                    cursor.execute('DELETE FROM specimens WHERE "specimenID" = ANY(%s);', (specimen_ids,))
-                cursor.execute('DELETE FROM observation_media WHERE demographic_id = ANY(%s);', (demographic_ids,))
-                cursor.execute('DELETE FROM observation_demographics WHERE "demographicID" = ANY(%s);', (demographic_ids,))
-
-            cursor.execute('DELETE FROM observation_media WHERE observation_id = ANY(%s);', (observation_ids,))
-            cursor.execute('DELETE FROM observation_literature_junction WHERE "observationID" = ANY(%s);', (observation_ids,))
-            cursor.execute('DELETE FROM observation_verification_actions WHERE "observationID" = ANY(%s);', (observation_ids,))
-            cursor.execute('DELETE FROM observation_taxonomy_override WHERE observation_id = ANY(%s);', (observation_ids,))
-            cursor.execute('DELETE FROM observations WHERE "eventID" = %s;', (event_id,))
-
-        cursor.execute('DELETE FROM sample_literature_junction WHERE "eventID" = %s;', (event_id,))
-        cursor.execute('DELETE FROM sample_project_junction WHERE "eventID" = %s;', (event_id,))
-        cursor.execute('DELETE FROM samples WHERE "eventID" = %s;', (event_id,))
-
+        cursor.execute("""
+            UPDATE samples SET record_status = 'draft', submitted_at = NULL
+            WHERE "eventID" = %s;
+        """, (event_id,))
+        _log_lifecycle(cursor, user, "withdraw", "samples", event_id)
         conn.commit()
-        return {"message": f"Sample {event_id} and any pending observations within it were withdrawn"}
+        return {"eventID": event_id, "record_status": "draft"}
     except HTTPException:
+        conn.rollback()
         raise
     except Exception as e:
         conn.rollback()
@@ -2917,6 +3030,297 @@ def withdraw_sample(event_id: str, user: dict = Depends(require_contributor)):
         cursor.close()
         conn.close()
 
+
+def _get_observation_for_lifecycle(cursor, observation_id: str) -> dict:
+    cursor.execute("""
+        SELECT "observationID", "eventID", "taxonID", submitted_by_user_id,
+               record_status, verification_status
+        FROM observations WHERE "observationID" = %s;
+    """, (observation_id,))
+    obs = cursor.fetchone()
+    if not obs:
+        raise HTTPException(status_code=404, detail="No such observation")
+    return obs
+
+
+@app.post("/api/v1/submit/observation/{observation_id}/submit")
+def submit_single_observation(observation_id: str, user: dict = Depends(require_contributor)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        obs = _get_observation_for_lifecycle(cursor, observation_id)
+        assert_can_modify_observation(obs, user)
+        if not obs["taxonID"]:
+            raise HTTPException(status_code=400, detail="This observation has no taxon yet")
+        cursor.execute('SELECT record_status FROM samples WHERE "eventID" = %s;', (obs["eventID"],))
+        sample = cursor.fetchone()
+        if not sample or sample["record_status"] != "submitted":
+            raise HTTPException(status_code=409, detail="Submit the sample first (or submit the sample together with its observations)")
+        cursor.execute("""
+            UPDATE observations
+            SET record_status = 'submitted', verification_status = 'pending', submitted_at = CURRENT_TIMESTAMP
+            WHERE "observationID" = %s;
+        """, (observation_id,))
+        _log_lifecycle(cursor, user, "submit", "observations", observation_id)
+        conn.commit()
+        return {"observationID": observation_id, "record_status": "submitted"}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not submit observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.post("/api/v1/submit/observation/{observation_id}/withdraw")
+def withdraw_observation_to_draft(observation_id: str, user: dict = Depends(require_contributor)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        obs = _get_observation_for_lifecycle(cursor, observation_id)
+        assert_can_modify_observation(obs, user)
+        cursor.execute("""
+            UPDATE observations
+            SET record_status = 'draft', verification_status = 'unverified', submitted_at = NULL
+            WHERE "observationID" = %s;
+        """, (observation_id,))
+        _log_lifecycle(cursor, user, "withdraw", "observations", observation_id)
+        conn.commit()
+        return {"observationID": observation_id, "record_status": "draft"}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not withdraw observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ----------------------------------------------------------
+# Delete (drafts only, and only when empty)
+# ----------------------------------------------------------
+@app.delete("/api/v1/submit/observation/{observation_id}")
+def delete_draft_observation(observation_id: str, user: dict = Depends(require_contributor)):
+    """Deletes a DRAFT observation, provided it has no demographic groups left in it."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        obs = _get_observation_for_lifecycle(cursor, observation_id)
+        assert_can_modify_observation(obs, user)
+        if obs["record_status"] != "draft":
+            raise HTTPException(status_code=409, detail="Withdraw this observation to draft before deleting it")
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_demographics WHERE "observationID" = %s;', (observation_id,))
+        if cursor.fetchone()["n"] > 0:
+            raise HTTPException(status_code=409, detail="Delete this observation's demographic groups first")
+        cursor.execute('DELETE FROM observation_literature_junction WHERE "observationID" = %s;', (observation_id,))
+        cursor.execute('DELETE FROM observation_media WHERE observation_id = %s;', (observation_id,))
+        cursor.execute('DELETE FROM observations WHERE "observationID" = %s;', (observation_id,))
+        _log_lifecycle(cursor, user, "delete_draft", "observations", observation_id)
+        conn.commit()
+        return {"message": "Draft observation deleted"}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete observation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/api/v1/submit/sample/{event_id}")
+def delete_draft_sample(event_id: str, user: dict = Depends(require_contributor)):
+    """
+    Deletes a sample, provided it is the contributor's own web-submitted
+    sample and it contains no observations at all (drafts included).
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        assert_can_modify_sample(cursor, event_id, user)
+        cursor.execute('SELECT COUNT(*) AS n FROM observations WHERE "eventID" = %s;', (event_id,))
+        if cursor.fetchone()["n"] > 0:
+            raise HTTPException(status_code=409, detail="This sample still contains observations - delete or move them first")
+        cursor.execute('DELETE FROM sample_literature_junction WHERE "eventID" = %s;', (event_id,))
+        cursor.execute('DELETE FROM sample_project_junction WHERE "eventID" = %s;', (event_id,))
+        cursor.execute('DELETE FROM observation_media WHERE sample_id = %s;', (event_id,))
+        cursor.execute('DELETE FROM samples WHERE "eventID" = %s;', (event_id,))
+        _log_lifecycle(cursor, user, "delete", "samples", event_id)
+        conn.commit()
+        return {"message": f"Sample {event_id} deleted"}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete sample: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+        
+        
+# ------------------------------------------------------------------
+# Edit / delete demographic groups and
+# specimens (contributors, on their own unreviewed records)
+# ------------------------------------------------------------------
+        
+class DemographicSelfEditSubmission(BaseModel):
+    sex: Optional[str] = None
+    lifestage: Optional[str] = None
+    count: Optional[str] = None
+    density: Optional[str] = None
+    densityUnit: Optional[str] = None
+    minCount: Optional[str] = None
+    maxCount: Optional[str] = None
+    countDescription: Optional[str] = None
+ 
+ 
+class SpecimenSelfEditSubmission(BaseModel):
+    specCount: Optional[str] = None
+    specLocation: Optional[str] = None
+    specRef: Optional[str] = None
+    specPreservation: Optional[str] = None
+    specType: Optional[str] = None
+    specComments: Optional[str] = None
+ 
+ 
+def _get_demographic_owner(cursor, demographic_id: str) -> dict:
+    cursor.execute("""
+        SELECT d."demographicID", o."observationID", o.submitted_by_user_id, o.verification_status
+        FROM observation_demographics d
+        JOIN observations o ON d."observationID" = o."observationID"
+        WHERE d."demographicID" = %s;
+    """, (demographic_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="No such demographic group")
+    return row
+ 
+ 
+def _get_specimen_owner(cursor, specimen_id: str) -> dict:
+    cursor.execute("""
+        SELECT sp."specimenID", o."observationID", o.submitted_by_user_id, o.verification_status
+        FROM specimens sp
+        JOIN observation_demographics d ON sp."demographicID" = d."demographicID"
+        JOIN observations o ON d."observationID" = o."observationID"
+        WHERE sp."specimenID" = %s;
+    """, (specimen_id,))
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="No such specimen record")
+    return row
+ 
+ 
+@app.put("/api/v1/submit/demographic/{demographic_id}")
+def edit_own_demographic(demographic_id: str, payload: DemographicSelfEditSubmission, user: dict = Depends(require_contributor)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        assert_can_modify_observation(_get_demographic_owner(cursor, demographic_id), user)
+        cursor.execute("""
+            UPDATE observation_demographics SET
+                sex = %s, lifestage = %s, count = %s, density = %s, "densityUnit" = %s,
+                "minCount" = %s, "maxCount" = %s, "countDescription" = %s
+            WHERE "demographicID" = %s;
+        """, (payload.sex, payload.lifestage, payload.count, payload.density, payload.densityUnit,
+              payload.minCount, payload.maxCount, payload.countDescription, demographic_id))
+        conn.commit()
+        return {"demographicID": demographic_id, "message": "Saved."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save demographic group: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+ 
+ 
+@app.delete("/api/v1/submit/demographic/{demographic_id}")
+def delete_own_demographic(demographic_id: str, user: dict = Depends(require_contributor)):
+    """Deletes a demographic group, provided it has no specimen records or images attached."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        assert_can_modify_observation(_get_demographic_owner(cursor, demographic_id), user)
+        cursor.execute('SELECT COUNT(*) AS n FROM specimens WHERE "demographicID" = %s;', (demographic_id,))
+        if cursor.fetchone()["n"] > 0:
+            raise HTTPException(status_code=409, detail="Delete this group's specimen records first")
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_media WHERE demographic_id = %s;', (demographic_id,))
+        if cursor.fetchone()["n"] > 0:
+            raise HTTPException(status_code=409, detail="This group has images attached - ask a superuser to remove it")
+        cursor.execute('DELETE FROM observation_demographics WHERE "demographicID" = %s;', (demographic_id,))
+        conn.commit()
+        return {"message": "Demographic group deleted"}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete demographic group: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+ 
+ 
+@app.put("/api/v1/submit/specimen/{specimen_id}")
+def edit_own_specimen(specimen_id: str, payload: SpecimenSelfEditSubmission, user: dict = Depends(require_contributor)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        assert_can_modify_observation(_get_specimen_owner(cursor, specimen_id), user)
+        cursor.execute("""
+            UPDATE specimens SET
+                "specCount" = %s, "specLocation" = %s, "specRef" = %s,
+                "specPreservation" = %s, "specType" = %s, "specComments" = %s
+            WHERE "specimenID" = %s;
+        """, (payload.specCount, payload.specLocation, payload.specRef,
+              payload.specPreservation, payload.specType, payload.specComments, specimen_id))
+        conn.commit()
+        return {"specimenID": specimen_id, "message": "Saved."}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not save specimen record: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+ 
+ 
+@app.delete("/api/v1/submit/specimen/{specimen_id}")
+def delete_own_specimen(specimen_id: str, user: dict = Depends(require_contributor)):
+    """Deletes a specimen record, provided it has no barcode or image records attached."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        assert_can_modify_observation(_get_specimen_owner(cursor, specimen_id), user)
+        cursor.execute('SELECT COUNT(*) AS n FROM specimen_barcodes WHERE specimen_id = %s;', (specimen_id,))
+        barcodes = cursor.fetchone()["n"]
+        cursor.execute('SELECT COUNT(*) AS n FROM observation_media WHERE specimen_id = %s;', (specimen_id,))
+        media = cursor.fetchone()["n"]
+        if barcodes or media:
+            raise HTTPException(status_code=409, detail="This specimen has barcode or image records attached - ask a superuser to remove it")
+        cursor.execute('DELETE FROM specimens WHERE "specimenID" = %s;', (specimen_id,))
+        conn.commit()
+        return {"message": "Specimen record deleted"}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Could not delete specimen record: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
 
 # ==========================================================
 # VERIFICATION / REVIEW (superuser only)
@@ -3083,7 +3487,7 @@ def submit_verification_action(
     controls what taxon this observation resolves to everywhere else
     in the site (view_effective_observations, the map, etc.).
     """
-    valid_actions = {"accepted", "rejected", "reassigned", "queried"}
+    valid_actions = {"accepted", "rejected", "reassigned", "queried", "unverifiable"}
     if payload.action_type not in valid_actions:
         raise HTTPException(status_code=400, detail=f"action_type must be one of {sorted(valid_actions)}")
     if payload.action_type == "reassigned" and not payload.reassigned_taxon_id:
@@ -3094,14 +3498,18 @@ def submit_verification_action(
         "rejected": "rejected",
         "reassigned": "verified",
         "queried": "queried",
+        "unverifiable": "unverifiable",
     }
 
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT "observationID" FROM observations WHERE "observationID" = %s;', (observation_id,))
-        if not cursor.fetchone():
+        cursor.execute('SELECT record_status FROM observations WHERE "observationID" = %s;', (observation_id,))
+        row = cursor.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="No such observation")
+        if row["record_status"] == "draft":
+            raise HTTPException(status_code=409, detail="This observation is still a draft")
 
         if payload.reassigned_taxon_id:
             cursor.execute('SELECT "taxonID" FROM taxonomy WHERE "taxonID" = %s;', (payload.reassigned_taxon_id,))
@@ -3975,9 +4383,9 @@ def duplicate_sample(event_id: str, payload: SampleDuplicateSubmission, user: di
                 "earliestDateCollected", "latestDateCollected", "habitat", "microhabitat",
                 "SHADe", "samplingProtocol", "samplesizeValue", "samplesizeUnit", "recordedBy",
                 "eventRemarks", "datarestricted", "licenceHolder", "dataSource[free text]",
-                submitted_by_user_id, entered_by, entered_at
+                submitted_by_user_id, entered_by, entered_at, record_status
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, 'draft'
             );
         """, (
             new_id, source["samplingLocation"], source["decimalLatitude"], source["decimalLongitude"],
