@@ -102,6 +102,10 @@ def serve_taxonomy():
 @app.get("/submit", response_class=FileResponse)
 def serve_submit():
     return FileResponse("submit.html")
+    
+@app.get("/my-submissions", response_class=FileResponse)
+def my_submissions_page():
+    return FileResponse("my_submissions.html")
 
 @app.get("/literature", response_class=FileResponse)
 def serve_literature():
@@ -3163,6 +3167,92 @@ def delete_draft_sample(event_id: str, user: dict = Depends(require_contributor)
     finally:
         cursor.close()
         conn.close()
+
+# ==================================================================
+# Fetch a single sample (with its observations,
+# demographic groups and specimens)
+# ==================================================================
+@app.get("/api/v1/submit/sample/{event_id}")
+def get_my_sample(event_id: str, user: dict = Depends(require_contributor)):
+    """
+    Returns one of the logged-in user's own samples, with its
+    observations nested inside it, each observation's demographic
+    groups nested under that, and each group's specimens nested
+    under that - the same shape the submit page has always used.
+    Only ever returns the user's own samples.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT
+                "eventID", "samplingLocation", "decimalLatitude", "decimalLongitude",
+                "coordinateuncertaintyinmeters" AS "coordinateUncertaintyInMeters",
+                "earliestDateCollected", "latestDateCollected",
+                "habitat", "microhabitat", "SHADe", "samplingProtocol",
+                "samplesizeValue", "samplesizeUnit", "datarestricted", "licenceHolder",
+                "recordedBy", "eventRemarks", record_status, qc_flags, entered_at
+            FROM samples
+            WHERE "eventID" = %s AND submitted_by_user_id = %s;
+        """, (event_id, user["user_id"]))
+        sample = cursor.fetchone()
+        if not sample:
+            raise HTTPException(status_code=404, detail="No such sample among your submissions")
+ 
+        cursor.execute("""
+            SELECT
+                o."observationID", o."eventID", o."taxonID",
+                t."scientificName", o.proposed_taxon_name,
+                o."identifiedBy", o."identificationVerificationStatus",
+                o."basisOfRecord", o."idTechnique", o."idText[free_text]" AS "idText",
+                o.record_status, o.verification_status, o.entered_at
+            FROM observations o
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            WHERE o."eventID" = %s AND o.submitted_by_user_id = %s
+            ORDER BY o.entered_at ASC, o."observationID" ASC;
+        """, (event_id, user["user_id"]))
+        observations = cursor.fetchall()
+ 
+        observation_ids = [o["observationID"] for o in observations]
+        demographics, specimens = [], []
+        if observation_ids:
+            cursor.execute("""
+                SELECT "demographicID", "observationID", sex, lifestage, count,
+                       density, "densityUnit", "minCount", "maxCount", "countDescription"
+                FROM observation_demographics
+                WHERE "observationID" = ANY(%s)
+                ORDER BY "demographicID" ASC;
+            """, (observation_ids,))
+            demographics = cursor.fetchall()
+ 
+            demographic_ids = [d["demographicID"] for d in demographics]
+            if demographic_ids:
+                cursor.execute("""
+                    SELECT "specimenID", "demographicID", "specCount", "specLocation",
+                           "specRef", "specPreservation", "specType", "specComments"
+                    FROM specimens
+                    WHERE "demographicID" = ANY(%s)
+                    ORDER BY "specimenID" ASC;
+                """, (demographic_ids,))
+                specimens = cursor.fetchall()
+ 
+        specimens_by_demo = {}
+        for spec in specimens:
+            specimens_by_demo.setdefault(spec["demographicID"], []).append(spec)
+        for demo in demographics:
+            demo["specimens"] = specimens_by_demo.get(demo["demographicID"], [])
+ 
+        demos_by_obs = {}
+        for demo in demographics:
+            demos_by_obs.setdefault(demo["observationID"], []).append(demo)
+        for obs in observations:
+            obs["demographics"] = demos_by_obs.get(obs["observationID"], [])
+ 
+        sample["observations"] = observations
+        return sample
+    finally:
+        cursor.close()
+        conn.close()
         
         
 # ------------------------------------------------------------------
@@ -3321,6 +3411,177 @@ def delete_own_specimen(specimen_id: str, user: dict = Depends(require_contribut
     finally:
         cursor.close()
         conn.close()
+        
+# ==========================================================
+# MY SUBMISSIONS PAGE ENDPOINTS
+# ==========================================================
+
+MY_SUBMISSIONS_PAGE_SIZES = (10, 25, 50, 100)
+ 
+# Only these sort keys are accepted (they map to SQL fragments we
+# control, so nothing the browser sends is ever put into the query).
+_MY_SAMPLE_SORTS = {
+    "eventID": 's."eventID"',
+    "samplingLocation": 's."samplingLocation"',
+    "earliestDateCollected": 's."earliestDateCollected"',
+    "latestDateCollected": 's."latestDateCollected"',
+    "habitat": 's.habitat',
+    "recordedBy": 's."recordedBy"',
+    "obs_count": "obs_count",
+    "draft_count": "draft_count",
+    "record_status": "s.record_status",
+    "entered_at": "s.entered_at",
+}
+ 
+_MY_OBS_SORTS = {
+    "observationID": 'o."observationID"',
+    "eventID": 'o."eventID"',
+    "scientificName": 'COALESCE(t."scientificName", o.proposed_taxon_name)',
+    "identifiedBy": 'o."identifiedBy"',
+    "basisOfRecord": 'o."basisOfRecord"',
+    "total_count": "dsum.total_count",
+    "record_status": "o.record_status, o.verification_status",
+    "entered_at": "o.entered_at",
+}
+ 
+_MY_OBS_STATUS_FILTERS = {
+    "draft": "o.record_status = 'draft'",
+    "pending": "o.record_status = 'submitted' AND o.verification_status = 'pending'",
+    "unverified": "o.record_status = 'submitted' AND o.verification_status = 'unverified'",
+    "verified": "o.verification_status = 'verified'",
+    "queried": "o.verification_status = 'queried'",
+    "rejected": "o.verification_status = 'rejected'",
+    "unverifiable": "o.verification_status = 'unverifiable'",
+}
+ 
+ 
+def _paging(page: int, page_size: int):
+    page = max(1, page)
+    if page_size not in MY_SUBMISSIONS_PAGE_SIZES:
+        page_size = 25
+    return page, page_size, (page - 1) * page_size
+ 
+ 
+@app.get("/api/v1/submit/my-submissions/samples")
+def my_submissions_samples(
+    page: int = 1, page_size: int = 25, sort: str = "entered_at", dir: str = "desc",
+    q: str = "", status: str = "",
+    user: dict = Depends(require_contributor)
+):
+    page, page_size, offset = _paging(page, page_size)
+    order_sql = _MY_SAMPLE_SORTS.get(sort, "s.entered_at")
+    direction = "ASC" if dir.lower() == "asc" else "DESC"
+ 
+    where = ["s.submitted_by_user_id = %s"]
+    params = [user["user_id"]]
+    if q.strip():
+        like = f"%{q.strip()}%"
+        where.append('(s."eventID" ILIKE %s OR s."samplingLocation" ILIKE %s OR s.habitat ILIKE %s OR s."recordedBy" ILIKE %s)')
+        params += [like, like, like, like]
+    if status == "draft":
+        where.append("s.record_status = 'draft'")
+    elif status == "has_drafts":
+        where.append("""EXISTS (SELECT 1 FROM observations o WHERE o."eventID" = s."eventID" AND o.record_status = 'draft')""")
+    elif status == "empty":
+        where.append("""NOT EXISTS (SELECT 1 FROM observations o WHERE o."eventID" = s."eventID")""")
+    where_sql = " AND ".join(where)
+ 
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"SELECT COUNT(*) AS n FROM samples s WHERE {where_sql};", params)
+        total = cursor.fetchone()["n"]
+ 
+        cursor.execute(f"""
+            SELECT
+                s."eventID", s."samplingLocation", s."decimalLatitude", s."decimalLongitude",
+                s."gridRef", s."earliestDateCollected", s."latestDateCollected",
+                s.habitat, s."recordedBy", s.record_status, s.entered_at,
+                (SELECT COUNT(*) FROM observations o WHERE o."eventID" = s."eventID") AS obs_count,
+                (SELECT COUNT(*) FROM observations o
+                   WHERE o."eventID" = s."eventID" AND o.record_status = 'draft') AS draft_count,
+                (left(s."eventID", 4) = 'WEB-' AND NOT EXISTS (
+                    SELECT 1 FROM observations o
+                    WHERE o."eventID" = s."eventID"
+                      AND o.verification_status NOT IN ('unverified', 'pending', 'queried')
+                )) AS can_edit
+            FROM samples s
+            WHERE {where_sql}
+            ORDER BY {order_sql} {direction} NULLS LAST, s."eventID" ASC
+            LIMIT %s OFFSET %s;
+        """, params + [page_size, offset])
+        return {"total": total, "page": page, "page_size": page_size, "rows": cursor.fetchall()}
+    finally:
+        cursor.close()
+        conn.close()
+ 
+ 
+@app.get("/api/v1/submit/my-submissions/observations")
+def my_submissions_observations(
+    page: int = 1, page_size: int = 25, sort: str = "entered_at", dir: str = "desc",
+    q: str = "", status: str = "",
+    user: dict = Depends(require_contributor)
+):
+    page, page_size, offset = _paging(page, page_size)
+    order_sql = _MY_OBS_SORTS.get(sort, "o.entered_at")
+    direction = "ASC" if dir.lower() == "asc" else "DESC"
+ 
+    where = ["o.submitted_by_user_id = %s"]
+    params = [user["user_id"]]
+    if q.strip():
+        like = f"%{q.strip()}%"
+        where.append("""(o."observationID" ILIKE %s OR o."eventID" ILIKE %s
+                         OR t."scientificName" ILIKE %s OR o.proposed_taxon_name ILIKE %s
+                         OR o."identifiedBy" ILIKE %s OR s."samplingLocation" ILIKE %s)""")
+        params += [like] * 6
+    if status in _MY_OBS_STATUS_FILTERS:
+        where.append(_MY_OBS_STATUS_FILTERS[status])
+    where_sql = " AND ".join(where)
+ 
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"""
+            SELECT COUNT(*) AS n
+            FROM observations o
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            LEFT JOIN samples s ON o."eventID" = s."eventID"
+            WHERE {where_sql};
+        """, params)
+        total = cursor.fetchone()["n"]
+ 
+        cursor.execute(f"""
+            SELECT
+                o."observationID", o."eventID",
+                COALESCE(t."scientificName", o.proposed_taxon_name) AS "scientificName",
+                o."identifiedBy", o."basisOfRecord", o.record_status, o.verification_status, o.entered_at,
+                s."samplingLocation",
+                dsum.total_count, dsum.group_count, dsum.demo_text,
+                (left(o."observationID", 4) = 'WEB-'
+                    AND o.verification_status IN ('unverified', 'pending', 'queried')) AS can_edit
+            FROM observations o
+            LEFT JOIN taxonomy t ON o."taxonID" = t."taxonID"
+            LEFT JOIN samples s ON o."eventID" = s."eventID"
+            LEFT JOIN LATERAL (
+                SELECT
+                    SUM(CASE WHEN d.count ~ '^[0-9]+$' THEN d.count::int END) AS total_count,
+                    COUNT(*) AS group_count,
+                    string_agg(
+                        NULLIF(concat_ws(' ', CASE WHEN d.count ~ '^[0-9]+$' THEN d.count END, d.sex, d.lifestage), ''),
+                        ', ' ORDER BY d."demographicID"
+                    ) AS demo_text
+                FROM observation_demographics d
+                WHERE d."observationID" = o."observationID"
+            ) dsum ON TRUE
+            WHERE {where_sql}
+            ORDER BY {order_sql} {direction} NULLS LAST, o."observationID" ASC
+            LIMIT %s OFFSET %s;
+        """, params + [page_size, offset])
+        return {"total": total, "page": page, "page_size": page_size, "rows": cursor.fetchall()}
+    finally:
+        cursor.close()
+        conn.close()        
+        
 
 # ==========================================================
 # VERIFICATION / REVIEW (superuser only)
