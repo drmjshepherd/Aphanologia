@@ -227,6 +227,7 @@
         .demo-card-actions { margin-top: 6px; display: flex; gap: 6px; }
         .spec-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
         .spec-card .demo-add-form { flex-basis: 100%; }
+        .summary-header .sci-name { font-style: italic; font-weight: 600; color: #1b4332; }
     </style>
 </head>
 <body>
@@ -251,10 +252,10 @@
             <!-- PANEL 1: New sample                            -->
             <!-- ============================================= -->
             <div class="panel" id="new-sample-panel">
-				<h2>1. Start a new sample</h2>
-				<p class="panel-intro">
+				<h2 id="sample-panel-title">1. Start a new sample</h2>
+				<p class="panel-intro" id="sample-intro">
 					A sample is a single sampling event &mdash; one visit to one place, which might contain
-					one specimen or many. Once you have saved it, you can add one or more species observations to it. Automatic checks run when you save; there is no review step for samples, and you can edit it afterwards.
+					one specimen or many. Once you have saved it, you can add one or more species observations to it. Automatic checks run when you save; there is no review step for samples, and you can edit it afterwards. To carry on with an earlier sample, open it from <a href="/my-submissions">My Submissions</a>.
 				</p>
 
 				<div id="sample-summary" style="display:none;"></div>
@@ -464,6 +465,7 @@
                 </p>
 
 
+				<div id="obs-detail" style="display:none;"></div>
 				<form id="observation-form">
 					<div class="field-row">
 						<div class="field full taxon-search-wrapper">
@@ -520,6 +522,7 @@
 
 					<div class="save-row" style="display:flex; gap:10px; align-items:center;">
 						<button type="submit" id="observation-form-submit-btn">Add this observation</button>
+						<button type="button" class="secondary" id="observation-with-demo-btn">Add with demographics</button>
 						<button type="button" class="secondary" id="obs-cancel-edit-btn" onclick="closeObservationPanel()">Close</button>
 					</div>
 					<div id="observation-status"></div>
@@ -527,20 +530,6 @@
             </div>
 
             </div><!-- /work-area -->
-
-            <!-- ============================================= -->
-            <!-- PANEL 3: Your pending submissions               -->
-            <!-- ============================================= -->
-            <div class="panel">
-                <h2>Your samples</h2>
-                <p class="panel-intro">
-                    Most recent first. Open a sample to see and edit its observations, or use it as a template for a new one.
-                    (This list will be replaced by the My Submissions page.)
-                </p>
-                <div id="my-samples-list">
-                    <p class="no-samples-message">Loading...</p>
-                </div>
-            </div>
 
     </div>
 
@@ -715,7 +704,7 @@
             currentUser = data;
             gate.style.display = 'none';
             main.style.display = 'block';
-            loadMySamples();
+            handleDeepLink();
         }
 
         checkAuth();
@@ -881,11 +870,11 @@
         // ==================================================
         let activeEventId = null;          // which sample is currently open in the left-hand panel
         let activeSample = null;           // that sample's full data (with observations), from the server
-        let mySamplesCache = [];           // everything the server last told us this user owns
         let editingSampleEventId = null;   // non-null while the form is editing an existing sample, rather than creating a new one
         let editingSampleSnapshot = null;  // the sample object being edited, so "Cancel edit" can revert without a re-fetch
         let reopenDemoFormFor = null;      // observation whose "add demographic detail" form should be open after the next refresh
-        let showAllSamples = false;
+        let detailObservationId = null;    // observation shown in the right-hand 'saved - add demographics' view
+        let detailKeepFormOpen = false;    // keep that view's 'add demographic detail' form open after a refresh
 
         function esc(v) {
             return String(v === null || v === undefined ? '' : v)
@@ -1014,7 +1003,7 @@
             const flags = (sample.qc_flags && sample.qc_flags.length)
                 ? `<div class="qc-note">Automatic checks flagged: ${sample.qc_flags.map(f => esc(f.message)).join('; ')}</div>` : '';
 
-            const obs = sample.observations || [];
+            const obs = (sample.observations || []).slice().reverse();   // newest first
             const obsHtml = obs.length === 0
                 ? '<p class="no-samples-message">No observations yet. Click &ldquo;Add an observation&rdquo; to start.</p>'
                 : obs.map(o => `
@@ -1058,6 +1047,8 @@
         function showSampleSummary(sample) {
             document.getElementById('sample-form').style.display = 'none';
             document.getElementById('sample-summary').style.display = 'block';
+            document.getElementById('sample-panel-title').textContent = '1. Sample details';
+            document.getElementById('sample-intro').style.display = 'none';
             renderSampleSummary(sample);
             updateLayout();
         }
@@ -1065,6 +1056,8 @@
         function showSampleForm(isEditing) {
             document.getElementById('sample-form').style.display = 'block';
             document.getElementById('sample-summary').style.display = 'none';
+            document.getElementById('sample-panel-title').textContent = isEditing ? '1. Edit sample details' : '1. Start a new sample';
+            document.getElementById('sample-intro').style.display = isEditing ? 'none' : '';
             document.getElementById('sample-form-submit-btn').textContent = isEditing ? 'Save changes' : 'Save sample';
             document.getElementById('sample-cancel-btn').style.display = isEditing ? 'none' : 'inline-block';
             document.getElementById('sample-cancel-edit-btn').style.display = isEditing ? 'inline-block' : 'none';
@@ -1073,11 +1066,6 @@
 
         function beginEditSampleActive() { if (activeSample) beginEditSample(activeSample); }
         function useActiveAsTemplate() { if (activeSample) useAsTemplate(activeSample); }
-        function useCachedAsTemplate(eventId) {
-            const s = mySamplesCache.find(x => x.eventID === eventId);
-            if (s) useAsTemplate(s);
-        }
-
         document.getElementById('sample-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const statusEl = document.getElementById('sample-status');
@@ -1141,9 +1129,10 @@
                 editingSampleEventId = null;
                 editingSampleSnapshot = null;
 
-                await loadMySamples();
-                activeSample = mySamplesCache.find(x => x.eventID === eventId)
-                    || { ...payload, eventID: eventId, record_status: 'submitted', observations: [] };
+                await refreshActiveSample();
+                if (!activeSample || activeSample.eventID !== eventId) {
+                    activeSample = { ...payload, eventID: eventId, record_status: 'submitted', observations: [] };
+                }
                 showSampleSummary(activeSample);
                 document.getElementById('active-event-id-label').textContent = eventId;
                 statusEl.innerHTML = '';
@@ -1190,24 +1179,55 @@
             resetSourcePicker();
             document.getElementById('sample-status').innerHTML = '';
             updateLayout();
-            renderSampleList();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         // Opens one of your existing samples in the left-hand panel,
         // with all its observations, ready to add to or edit.
-        function openSample(eventId) {
-            const s = mySamplesCache.find(x => x.eventID === eventId);
-            if (!s) return;
-            editingSampleEventId = null;
-            editingSampleSnapshot = null;
-            closeObservationPanel();
-            activeEventId = eventId;
-            activeSample = s;
-            showSampleSummary(s);
-            document.getElementById('active-event-id-label').textContent = eventId;
-            renderSampleList();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+        async function openSample(eventId) {
+            try {
+                const res = await fetch(`/api/v1/submit/sample/${encodeURIComponent(eventId)}`);
+                const data = await res.json();
+                if (!res.ok) return false;
+                editingSampleEventId = null;
+                editingSampleSnapshot = null;
+                closeObservationPanel();
+                activeEventId = eventId;
+                activeSample = data;
+                showSampleSummary(data);
+                document.getElementById('active-event-id-label').textContent = eventId;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return true;
+            } catch (err) {
+                console.error('openSample failed:', err);
+                return false;
+            }
+        }
+
+        // Lets the My Submissions page link straight to a sample (and
+        // optionally one of its observations), e.g.
+        //   /submit?sample=WEB-12                                  -> open sample
+        //   /submit?sample=WEB-12&action=edit                      -> open it for editing
+        //   /submit?sample=WEB-12&observation=WEB-34&action=edit   -> edit that observation
+        async function handleDeepLink() {
+            const params = new URLSearchParams(window.location.search);
+            const sampleId = params.get('sample');
+            if (!sampleId) return;
+            const opened = await openSample(sampleId);
+            if (!opened) {
+                alert(`Could not find sample ${sampleId} among your submissions.`);
+                return;
+            }
+            const observationId = params.get('observation');
+            if (params.get('action') === 'edit') {
+                if (observationId) {
+                    const o = (activeSample.observations || []).find(x => x.observationID === observationId);
+                    if (o && obsIsEditable(o)) editObservation(observationId);
+                } else if (sampleIsFullyPending(activeSample)) {
+                    beginEditSample(activeSample);
+                }
+            }
+            history.replaceState(null, '', window.location.pathname);
         }
 
         function ensureOptionExists(selectEl, value) {
@@ -1334,8 +1354,7 @@
             }
         });
 
-        document.getElementById('observation-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
+        async function saveObservation(withDemographics) {
             const statusEl = document.getElementById('observation-status');
             statusEl.innerHTML = '';
 
@@ -1370,24 +1389,38 @@
                     body: JSON.stringify(payload)
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || 'Could not save observation');
+                if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not save observation');
 
                 const taxonName = obsSearchBox.value || 'this species';
                 if (isEditing) {
                     closeObservationPanel();
-                } else {
-                    // Ready for the next species straight away; the new
-                    // observation's demographic form opens in the sample panel.
+                    await refreshActiveSample();
+                } else if (withDemographics) {
+                    // Show the saved observation at the top of this panel with the
+                    // demographic form open underneath it
                     resetObservationForm();
-                    reopenDemoFormFor = data.observationID;
+                    await refreshActiveSample();
+                    showObservationDetail(data.observationID);
+                } else {
+                    // Ready for the next species straight away
+                    resetObservationForm();
                     document.getElementById('observation-status').innerHTML =
-                        `<div class="status-message success">Added <i>${esc(taxonName)}</i> as a draft. Add its counts in the sample panel, or enter the next species here.</div>`;
+                        `<div class="status-message success">Added <i>${esc(taxonName)}</i> as a draft. Enter the next species here, or add counts to it from the sample panel.</div>`;
                     obsSearchBox.focus();
+                    await refreshActiveSample();
                 }
-                await loadMySamples();
             } catch (err) {
                 statusEl.innerHTML = `<div class="status-message error">${esc(err.message)}</div>`;
             }
+        }
+
+        document.getElementById('observation-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            saveObservation(false);
+        });
+        document.getElementById('observation-with-demo-btn').addEventListener('click', () => {
+            if (!document.getElementById('observation-form').reportValidity()) return;
+            saveObservation(true);
         });
 
         function populateObservationFormFields(snap) {
@@ -1410,6 +1443,8 @@
             document.getElementById('obs-taxon-dropdown').classList.remove('visible');
             document.getElementById('obs-panel-title').textContent = '2. Add a species observation';
             document.getElementById('observation-form-submit-btn').textContent = 'Add this observation';
+            document.getElementById('observation-with-demo-btn').style.display = '';
+            leaveObservationDetail();
         }
 
         // Opens the right-hand panel: blank for a new observation, or
@@ -1420,6 +1455,7 @@
                 currentObservationID = obs.observationID;
                 document.getElementById('obs-panel-title').textContent = 'Edit observation';
                 document.getElementById('observation-form-submit-btn').textContent = 'Save changes';
+                document.getElementById('observation-with-demo-btn').style.display = 'none';
                 populateObservationFormFields({
                     taxonID: obs.taxonID,
                     taxonLabel: obs.scientificName || '',
@@ -1441,6 +1477,55 @@
             resetObservationForm();
             document.getElementById('add-observation-panel').style.display = 'none';
             updateLayout();
+        }
+
+        // ---- The "saved - now add demographic detail" view in the right-hand panel ----
+        function showObservationDetail(observationId) {
+            detailObservationId = observationId;
+            detailKeepFormOpen = true;
+            document.getElementById('observation-form').style.display = 'none';
+            document.getElementById('obs-panel-title').textContent = 'Observation saved as a draft';
+            document.getElementById('add-observation-panel').style.display = 'block';
+            updateLayout();
+            renderObservationDetailPanel();
+        }
+
+        function leaveObservationDetail() {
+            detailObservationId = null;
+            detailKeepFormOpen = false;
+            const holder = document.getElementById('obs-detail');
+            holder.style.display = 'none';
+            holder.innerHTML = '';
+            document.getElementById('observation-form').style.display = '';
+        }
+
+        function renderObservationDetailPanel() {
+            const holder = document.getElementById('obs-detail');
+            const o = ((activeSample && activeSample.observations) || []).find(x => x.observationID === detailObservationId);
+            if (!o) { leaveObservationDetail(); return; }
+            const name = o.scientificName || o.proposed_taxon_name || 'Unresolved taxon';
+            holder.style.display = 'block';
+            holder.innerHTML = `
+                <div class="summary-box">
+                    <div class="summary-header">
+                        <span class="sci-name">${esc(name)}</span>
+                        <span class="event-id">${o.observationID}</span> ${statusTag(o.record_status, o.verification_status)}
+                    </div>
+                    ${fieldRow('Identified by', esc(o.identifiedBy))}
+                    ${fieldRow('Confidence', esc(o.identificationVerificationStatus))}
+                    ${fieldRow('Basis of record', esc(o.basisOfRecord))}
+                    ${fieldRow('ID technique', esc(o.idTechnique))}
+                    ${fieldRow('ID notes', esc(o.idText))}
+                    <div class="card-actions">
+                        <button type="button" class="small" onclick="editObservation('${o.observationID}')">Edit observation</button>
+                        <button type="button" class="small" onclick="openObservationPanel()">Add another observation</button>
+                        <button type="button" class="small secondary" onclick="closeObservationPanel()">Close</button>
+                    </div>
+                </div>
+                <div id="obs-detail-demos"></div>`;
+            renderObservationDemographics(document.getElementById('obs-detail-demos'), o.observationID, name, o.demographics || [],
+                { editable: obsIsEditable(o), openForm: detailKeepFormOpen, reopenTarget: 'right' });
+            detailKeepFormOpen = false;
         }
 
         function editObservation(observationId) {
@@ -1490,8 +1575,9 @@
                 wrapper.appendChild(toggleBtn);
 
                 const form = buildDemoForm(observationId, null, () => {
-                    reopenDemoFormFor = observationId;   // stay open for the next group
-                    loadMySamples();
+                    // stay open for the next group, in whichever view the form was in
+                    if (opts.reopenTarget === 'right') detailKeepFormOpen = true; else reopenDemoFormFor = observationId;
+                    refreshActiveSample();
                 });
                 wrapper.appendChild(form);
                 toggleBtn.addEventListener('click', () => form.classList.toggle('visible'));
@@ -1632,7 +1718,7 @@
                 actions.appendChild(delBtn);
                 card.appendChild(actions);
 
-                const editForm = buildDemoForm(demo.observationID, demo, () => loadMySamples());
+                const editForm = buildDemoForm(demo.observationID, demo, () => refreshActiveSample());
                 card.appendChild(editForm);
                 editBtn.addEventListener('click', () => editForm.classList.toggle('visible'));
                 delBtn.addEventListener('click', () => lifecycleAction(
@@ -1645,7 +1731,7 @@
                 specToggle.textContent = '+ Add a specimen record';
                 card.appendChild(specToggle);
 
-                const specForm = buildSpecimenForm(demo.demographicID, null, () => loadMySamples());
+                const specForm = buildSpecimenForm(demo.demographicID, null, () => refreshActiveSample());
                 card.appendChild(specForm);
                 specToggle.addEventListener('click', () => specForm.classList.toggle('visible'));
             }
@@ -1763,7 +1849,7 @@
                 actions.appendChild(delBtn);
                 card.appendChild(actions);
 
-                const editForm = buildSpecimenForm(spec.demographicID, spec, () => loadMySamples());
+                const editForm = buildSpecimenForm(spec.demographicID, spec, () => refreshActiveSample());
                 card.appendChild(editForm);
                 editBtn.addEventListener('click', () => editForm.classList.toggle('visible'));
                 delBtn.addEventListener('click', () => lifecycleAction(
@@ -1774,71 +1860,27 @@
         }
 
         // ==================================================
-        // LOADING YOUR SAMPLES  (one fetch feeds both the open-sample
-        // panel and the list at the bottom of the page)
+        // REFRESHING THE OPEN SAMPLE FROM THE SERVER
+        // (the whole overview, including the right-hand
+        // "saved observation" view, is redrawn from this)
         // ==================================================
-        async function loadMySamples() {
-            const listEl = document.getElementById('my-samples-list');
+        async function refreshActiveSample() {
+            if (!activeEventId) return;
             try {
-                const res = await fetch('/api/v1/submit/my-samples');
+                const res = await fetch(`/api/v1/submit/sample/${encodeURIComponent(activeEventId)}`);
                 const data = await res.json();
                 if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not load');
-                mySamplesCache = data.samples || [];
-                renderSampleList();
-
-                if (activeEventId) {
-                    const s = mySamplesCache.find(x => x.eventID === activeEventId);
-                    if (s) {
-                        activeSample = s;
-                        // Only refresh the overview if it is what is currently showing
-                        // (not while the sample form is open for editing)
-                        if (document.getElementById('sample-summary').style.display === 'block') {
-                            renderSampleSummary(s);
-                        }
-                    }
+                if (data.eventID !== activeEventId) return;   // switched sample while loading
+                activeSample = data;
+                // Only redraw the overview if it is what is currently showing
+                // (not while the sample form is open for editing)
+                if (document.getElementById('sample-summary').style.display === 'block') {
+                    renderSampleSummary(data);
                 }
+                if (detailObservationId) renderObservationDetailPanel();
             } catch (err) {
-                console.error('loadMySamples failed:', err);
-                listEl.innerHTML = '<p class="no-samples-message">Could not load your samples.</p>';
+                console.error('refreshActiveSample failed:', err);
             }
-        }
-
-        function toggleShowAllSamples() {
-            showAllSamples = !showAllSamples;
-            renderSampleList();
-        }
-
-        function renderSampleList() {
-            const listEl = document.getElementById('my-samples-list');
-            if (!mySamplesCache.length) {
-                listEl.innerHTML = '<p class="no-samples-message">You have not created any samples yet.</p>';
-                return;
-            }
-            const shown = showAllSamples ? mySamplesCache : mySamplesCache.slice(0, 15);
-            listEl.innerHTML = shown.map(s => {
-                const obs = s.observations || [];
-                const nDraft = obs.filter(o => o.record_status === 'draft').length;
-                return `
-                    <div class="sample-card compact${s.eventID === activeEventId ? ' active' : ''}">
-                        <div class="sample-card-header">
-                            <span>
-                                <span class="sample-title">${esc(s.samplingLocation) || 'Unnamed location'}</span>
-                                <span class="event-id">${s.eventID}</span> ${statusTag(s.record_status, null)}
-                            </span>
-                            <span class="card-actions" style="margin-top:0;">
-                                <button type="button" class="small" onclick="openSample('${s.eventID}')">Open</button>
-                                <button type="button" class="small secondary" onclick="useCachedAsTemplate('${s.eventID}')">Use as template</button>
-                            </span>
-                        </div>
-                        <div class="sample-card-meta" style="margin-bottom:0;">
-                            ${esc(s.earliestDateCollected) || 'Date unrecorded'} &middot;
-                            ${esc(s.habitat) || 'Habitat unrecorded'} &middot;
-                            ${obs.length} observation(s)${nDraft ? ` (${nDraft} draft)` : ''}
-                        </div>
-                    </div>`;
-            }).join('') + (mySamplesCache.length > 15
-                ? `<button type="button" class="toggle-add-link" onclick="toggleShowAllSamples()">${showAllSamples ? 'Show only the 15 most recent' : `Show all ${mySamplesCache.length} samples`}</button>`
-                : '');
         }
 
         // ---- Submit / withdraw / delete actions ----
@@ -1854,14 +1896,14 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'That did not work');
                 if (afterFn) afterFn(data);
-                loadMySamples();
+                refreshActiveSample();
             } catch (err) {
                 alert(err.message);
             }
         }
 
         function submitAllForReview(eventId) {
-            const s = mySamplesCache.find(x => x.eventID === eventId);
+            const s = activeSample;
             const n = s ? (s.observations || []).filter(o => o.record_status === 'draft').length : 0;
             lifecycleAction(
                 `/api/v1/submit/sample/${encodeURIComponent(eventId)}/submit`, 'POST',
