@@ -16,8 +16,13 @@
  *   handle.setCode('TsXx-5-6-5');  // re-populate the builder from a code string
  *   handle.getCode();              // current code, or null if incomplete
  *
+ * Codes are <sub1><sub2>-<humidity>-<acidity>-<disturbance>-<salinity>
+ * (salinity: 0 unknown/not relevant, 1 fresh, 2 brackish/variable, 3 saline,
+ * 4 hypersaline). Older 4-part codes with no salinity are still read, and
+ * returned unchanged until a salinity is chosen.
+ *
  * setCode() is defensive: a code that isn't in the expected
- * <sub1><sub2>-<humidity>-<acidity>-<disturbance> shape (e.g. an
+ * <sub1><sub2>-<humidity>-<acidity>-<disturbance>[-<salinity>] shape (e.g. an
  * old/manually-typed value that predates this builder) just leaves
  * the builder's own fields blank rather than throwing - the raw text
  * is never touched by this widget, only offered as a starting point.
@@ -27,7 +32,7 @@
 
     const SHADE_SUBSTRATES = {
         S: { label: "Soil - mineral soil or sediment", subs: { s: "Sandy", c: "Clayey", z: "Silty", l: "Loamy", o: "Organic", b: "Subsoil" } },
-        O: { label: "Organic matter (excl. living/woody/dung)", subs: { f: "Fresh cut plant material (e.g. grass clippings)", d: "Decomposing plant material", h: "Humified plant material (no recognisable remains)", b: "Broadleaved leaf litter", c: "Conifer (needle) litter", n: "Nest material of animals", s: "Dried stored food products", p: "Peat" } },
+        O: { label: "Organic matter (excl. living/woody/dung)", subs: { f: "Fresh cut plant material (e.g. grass clippings)", d: "Decomposing plant material", h: "Humified plant material (no recognisable remains)", b: "Broadleaved leaf litter", c: "Conifer (needle) litter", l: "Litter (other)", g: "Graminoid litter (grass, sedge, rush)", n: "Nest material of animals", s: "Dried stored food products", p: "Peat" } },
         I: { label: "Inert man-made material", subs: { p: "Plastic / rubber", m: "Metal", o: "Other" } },
         L: { label: "Lichen", subs: { c: "Crustose lichen", n: "Non-crustose lichen" } },
         P: { label: "Plant (non-woody, living)", subs: { l: "Leaves of living plants", r: "Roots of plant", f: "Flowers or fruit", s: "Stems or axils" } },
@@ -60,6 +65,13 @@
         [6, "6 - 1 decade to 1 century ago"],
         [7, "7 - A century or more ago (effectively undisturbed)"],
         [0, "0 - Unknown / not estimated"],
+    ];
+    const SHADE_SALINITY = [
+        [1, "1 - Freshwater"],
+        [2, "2 - Brackish or variable"],
+        [3, "3 - Saline"],
+        [4, "4 - Hypersaline"],
+        [0, "0 - Not relevant / unknown"],
     ];
     const SHADE_PLANT_PH = [
         [4, "Cotton grasses (Eriophorum vaginatum / angustifolium)"], [4, "Crowberry"], [4, "Scots pine"],
@@ -174,6 +186,10 @@
                     <span class="shdw-step-label">Disturbance history</span>
                     <select id="${uid}-disturbance"></select>
                 </div>
+                <div class="shdw-step">
+                    <span class="shdw-step-label">Salinity</span>
+                    <select id="${uid}-salinity"></select>
+                </div>
                 <div class="shdw-preview" id="${uid}-preview">Complete the fields above to build the code...</div>
             </div>
         `;
@@ -183,6 +199,11 @@
         const sub2Major = el('sub2-major'), sub2Minor = el('sub2-minor');
         const sub2Toggle = el('sub2-toggle'), sub2Row = el('sub2-row');
         const humidity = el('humidity'), acidity = el('acidity'), disturbance = el('disturbance');
+        const salinity = el('salinity');
+        // True while a legacy 4-part code (no salinity) is loaded and the
+        // user hasn't chosen a salinity - the code is then returned in its
+        // original 4-part shape rather than being treated as incomplete.
+        let legacyFourPart = false;
         const acidityLookup = el('acidity-lookup'), acidityResults = el('acidity-results');
         const preview = el('preview');
         const helpBtn = el('help'), explainer = el('explainer');
@@ -207,6 +228,9 @@
             for (const [subCode, subLabel] of Object.entries(group.subs)) {
                 minorSelectEl.innerHTML += `<option value="${subCode}">${subLabel}</option>`;
             }
+            // Subtype can't always be known (e.g. a cobble lying on soil of
+            // unknown texture is Rc + Sx), so every major group allows 'x'.
+            minorSelectEl.innerHTML += `<option value="x">x - Unknown / unspecified subtype</option>`;
             if (preselect) minorSelectEl.value = preselect;
         }
         function populateNumberSelect(selectEl, options) {
@@ -222,6 +246,7 @@
         populateSubstrateMinor(sub2Major, sub2Minor);
         populateNumberSelect(humidity, SHADE_HUMIDITY);
         populateNumberSelect(disturbance, SHADE_DISTURBANCE);
+        populateNumberSelect(salinity, SHADE_SALINITY);
         acidity.innerHTML = '<option value="">-- Select --</option><option value="0">0 - Unknown</option>';
         for (let ph = 3; ph <= 9; ph++) acidity.innerHTML += `<option value="${ph}">pH ${ph}</option>`;
 
@@ -239,7 +264,10 @@
             } else {
                 part2 = 'Xx';
             }
-            return `${part1}${part2}-${h}-${a}-${d}`;
+            const base = `${part1}${part2}-${h}-${a}-${d}`;
+            const sal = salinity.value;
+            if (sal === '') return legacyFourPart ? base : null;
+            return `${base}-${sal}`;
         }
 
         function fireChange() {
@@ -249,9 +277,10 @@
             if (opts.onChange) opts.onChange(code);
         }
 
-        [sub1Major, sub1Minor, sub2Major, sub2Minor, humidity, acidity, disturbance].forEach(elm => {
+        [sub1Major, sub1Minor, sub2Major, sub2Minor, humidity, acidity, disturbance, salinity].forEach(elm => {
             elm.addEventListener('change', fireChange);
         });
+        salinity.addEventListener('change', () => { legacyFourPart = false; });
         sub1Major.addEventListener('change', () => { populateSubstrateMinor(sub1Major, sub1Minor); fireChange(); });
         sub2Major.addEventListener('change', () => { populateSubstrateMinor(sub2Major, sub2Minor); fireChange(); });
         sub2Toggle.addEventListener('change', () => {
@@ -287,10 +316,10 @@
             // builder blank - the raw text elsewhere is never touched
             // by this widget, so nothing is lost either way.
             if (!code || typeof code !== 'string') { fireChange(); return; }
-            const m = code.match(/^([A-Za-z])([A-Za-z])([A-Za-z])([A-Za-z])-(\d)-(\d)-(\d)$/);
+            const m = code.match(/^([A-Za-z])([A-Za-z])([A-Za-z])([A-Za-z])-(\d)-(\d)-(\d)(?:-(\d))?$/);
             if (!m) { fireChange(); return; }
-            const [, s1a, s1b, s2a, s2b, h, a, d] = m;
-            if (SHADE_SUBSTRATES[s1a]) {
+            const [, s1a, s1b, s2a, s2b, h, a, d, sal] = m;
+            if (SHADE_SUBSTRATES[s1a] || s1a === 'X') {
                 sub1Major.value = s1a;
                 populateSubstrateMinor(sub1Major, sub1Minor, s1b);
             }
@@ -306,6 +335,8 @@
             humidity.value = h;
             acidity.value = a;
             disturbance.value = d;
+            salinity.value = (sal === undefined) ? '' : sal;
+            legacyFourPart = (sal === undefined);
             fireChange();
         }
 
@@ -319,6 +350,8 @@
             humidity.value = '';
             acidity.value = '';
             disturbance.value = '';
+            salinity.value = '';
+            legacyFourPart = false;
             acidityLookup.value = '';
             acidityResults.innerHTML = '';
             fireChange();
