@@ -39,7 +39,14 @@ app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET_KEY"
 # literature reference" component used by the taxonomy editor and
 # (eventually) the sample submission form, so that widget only has
 # to be written and maintained once.
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
 
 # Sets up the connection to Google's sign-in system using the
 # credentials from .env. server_metadata_url points Authlib at
