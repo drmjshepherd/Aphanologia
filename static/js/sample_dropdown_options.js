@@ -1,12 +1,20 @@
 /*
  * sample_dropdown_options.js
  * -----------------------------------------------------------------
- * Single source of truth for the Habitat and Sampling protocol
- * dropdown lists, shared between the sample submission form and the
- * record editor's sample panel. Written here once so the two forms
- * can't drift back out of sync with each other the way they had
- * before - any future addition to either list only needs to happen
- * in this one file.
+ * Single source of truth for the dropdown lists shared between the
+ * contributor forms (submit.html) and the superuser record editor:
+ * Habitat, Sampling protocol, and the three observation lists
+ * (identification confidence, basis of record, identification
+ * technique). Any future addition only needs to happen in this one
+ * file.
+ *
+ * main.py also READS the three observation lists from this file when
+ * the server starts, and rejects values that aren't in them, so the
+ * lists are enforced on the server as well as shown in the forms.
+ * Keep each of those three lists as a plain array of double-quoted
+ * strings (const NAME = [ "a", "b" ];) so the server can read them.
+ * Existing records holding older wording stay editable: an unchanged
+ * old value is always accepted.
  */
 (function (global) {
     const HABITATS = [
@@ -55,5 +63,34 @@
         "Tow netting", "Tullgren funnel", "Vacuum sampling", "Whitehead Tray", "Winkler bag",
     ];
 
-    global.SampleDropdownOptions = { HABITATS, SAMPLING_PROTOCOLS };
+    // Confidence the identifier has in their own identification. Whether
+    // someone ELSE has checked the record is tracked separately by the
+    // review workflow, so there is deliberately no "unverified" option.
+    const IDENTIFICATION_CONFIDENCE = [
+        "certain", "probable", "plausible", "unlikely",
+    ];
+
+    const BASIS_OF_RECORD = [
+        "Preserved specimen",
+        "Slide mount (uncleared)",
+        "Slide mount (cleared)",
+        "Direct observation",
+        "Still photograph",
+        "Video",
+        "SEM image",
+        "Environmental DNA (trace)",
+        "Metabarcoding",
+        "Sign (e.g. gall)",
+    ];
+
+    const ID_TECHNIQUES = [
+        "Morphological identification",
+        "Genetic identification",
+        "Automated image recognition",
+    ];
+
+    global.SampleDropdownOptions = {
+        HABITATS, SAMPLING_PROTOCOLS,
+        IDENTIFICATION_CONFIDENCE, BASIS_OF_RECORD, ID_TECHNIQUES,
+    };
 })(window);
