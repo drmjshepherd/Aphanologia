@@ -906,13 +906,20 @@ Some additional tweaks were made so that samples are NOT subject to draft status
 
 ### Developing a "My submissions" page
 
-The page was developed with two tabs, Samples and Observations, each showing one page of rows at a time. The server does the paging, sorting, searching and filtering, so it will stay fast when you have thousands of records. You can choose 10, 25, 50 or 100 rows per page, and each tab remembers its own sort, search and filter.
+The page [my_submissions.html](my_submissions.html) was developed with two tabs, Samples and Observations, each showing one page of rows at a time. The server does the paging, sorting, searching and filtering, so it will stay fast when you have thousands of records. You can choose 10, 25, 50 or 100 rows per page, and each tab remembers its own sort, search and filter.
 Samples columns: ID, location, coordinates, earliest and latest date, habitat, recorded by, number of observations, number of drafts, status and date entered. Long text fields are left out.
 Observations columns: ID, sample, species, location, identified by, basis of record, total count, a demographics summary (such as "2 female adult, 3 nymph"), status and date entered.
 Filters:
 Samples: all, with drafts, empty, or draft.
 Observations: draft, awaiting review, unverified, queried, verified, rejected, or unverifiable.
 Selecting a row enables View, Edit, Submit for review and Withdraw to draft for observations, and Submit N drafts for review for samples. Buttons grey out when the record can't be changed. There's no delete, as you decided.
-View and Edit open the submit page with that sample or observation already loaded. This involv one addition to submit.html, so it can read the sample from the web address.
+View and Edit open the submit page with that sample or observation already loaded. This involved one addition to submit.html, so it can read the sample from the web address.
 The button on the landing page shows for contributors, superusers and hyperusers, and stays hidden from everyone else.
+
+### Harmonising the record editor and sample/observation submission pages and updateing the SHADe picker
+
+During the redevelopment of the submissions pages above, it became clear that the record editor and submissions pages needed to be harmonised in terms of the fields that were editable, the use of drop downs etc.  The opportunity was also taken to revise the SHADe picker to include 2 new types of organic matter (Ol for litter - other:  this was needed to encompass e.g. dwarf shrub litter, and Og for graminoid litter).  The SHADe system was also expanded to include an additional factor to indicate the salinity of the sample with 0 being unknown or irrelevant, 1 being freshwater, 2 being brackish, 3 being saline (sea water), and 4 being hypersaline.
+
+Revisions were made to the [shade_widget.js](shade_widget.js) file, and minor alterations made to [submit.html](submit.html) and [record_editor.html](record_editor.html).  An issue with the system using a cached version of the old js widget was addressed by adding a section to [main.py](main.py) to force it to check whether the js versions had changed and reload them if they have.
+
 
