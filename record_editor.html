@@ -186,7 +186,7 @@
 
     <script src="/static/js/literature_widget.js"></script>
     <script src="/static/js/shade_widget.js?v=20261010"></script>
-    <script src="/static/js/sample_dropdown_options.js?v=20261010"></script>
+    <script src="/static/js/sample_dropdown_options.js?v=20261011"></script>
     <script>
         let currentUser = null;
         let isSuperuser = false;
@@ -602,6 +602,23 @@
 
         function esc(v) { return (v === null || v === undefined) ? '' : String(v).replace(/"/g, '&quot;'); }
 
+        // Dropdown built from the shared options file. A value already stored
+        // on the record that isn't in the list (older wording) is kept as an
+        // extra option so opening and saving never silently blanks it.
+        function optionSelectHtml(id, options, current, capitalise) {
+            const safe = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+            const label = v => capitalise ? v.charAt(0).toUpperCase() + v.slice(1) : v;
+            let html = `<select id="${id}"><option value="">-- Select --</option>`;
+            const known = options.includes(current);
+            if (current && !known) {
+                html += `<option value="${safe(current)}" selected>${safe(current)} (existing value, not in the standard list)</option>`;
+            }
+            for (const v of options) {
+                html += `<option value="${safe(v)}"${v === current ? ' selected' : ''}>${safe(label(v))}</option>`;
+            }
+            return html + '</select>';
+        }
+
         function renderLinkList(containerId, items, mainHtml, onRemove) {
             const el = document.getElementById(containerId);
             if (!items || items.length === 0) { el.innerHTML = '<p class="no-items">None yet.</p>'; return; }
@@ -837,6 +854,10 @@
 
         function renderObservationPanel(data) {
             const o = data.observation;
+            // Collection ID and catalogue number no longer have inputs here (they
+            // belong on specimens). Their stored values are kept and sent back
+            // unchanged on save, so editing an observation never erases them.
+            window.obsLegacyCollection = { collectionID: o.collectionID || null, catalogNumber: o.catalogNumber || null };
             const panel = document.getElementById('observation-panel');
             panel.innerHTML = `
                 <h2>Observation: <span class="taxon-name" style="font-style:italic;">${o.taxon_name || o.taxonID}</span></h2>
@@ -869,17 +890,22 @@
                 </div>
                 <div class="field-row">
                     <div class="field"><label>Identified by</label><input type="text" id="o-identifiedby" value="${esc(o.identifiedBy)}"></div>
-                    <div class="field"><label>ID verification status</label><input type="text" id="o-idverifstatus" value="${esc(o.identificationVerificationStatus)}"></div>
-                    <div class="field"><label>ID technique</label><input type="text" id="o-idtechnique" value="${esc(o.idTechnique)}"></div>
+                    <div class="field"><label>Confidence in identification</label>${optionSelectHtml('o-idverifstatus', SampleDropdownOptions.IDENTIFICATION_CONFIDENCE, o.identificationVerificationStatus, true)}</div>
+                    <div class="field"><label>Identification technique</label>${optionSelectHtml('o-idtechnique', SampleDropdownOptions.ID_TECHNIQUES, o.idTechnique, false)}</div>
                 </div>
                 <div class="field-row">
                     <div class="field full"><label>Identification remarks</label><textarea id="o-idremarks">${esc(o.identificationRemarks)}</textarea></div>
                 </div>
                 <div class="field-row">
-                    <div class="field"><label>Collection ID</label><input type="text" id="o-collectionid" value="${esc(o.collectionID)}"></div>
-                    <div class="field"><label>Catalog number</label><input type="text" id="o-catalognumber" value="${esc(o.catalogNumber)}"></div>
-                    <div class="field"><label>Basis of record</label><input type="text" id="o-basisofrecord" value="${esc(o.basisOfRecord)}"></div>
+                    <div class="field"><label>Basis of record</label>${optionSelectHtml('o-basisofrecord', SampleDropdownOptions.BASIS_OF_RECORD, o.basisOfRecord, false)}</div>
                 </div>
+                ${(o.collectionID || o.catalogNumber) ? `
+                <div class="field-row">
+                    <div class="field full">
+                        <label>Legacy collection details <span class="hint">(read-only - to be moved onto specimens)</span></label>
+                        <div class="picker-current">${o.collectionID ? esc(o.collectionID) : ''}${(o.collectionID && o.catalogNumber) ? ' &middot; ' : ''}${o.catalogNumber ? 'Catalogue no. ' + esc(o.catalogNumber) : ''}</div>
+                    </div>
+                </div>` : ''}
                 <div class="field-row">
                     <div class="field full">
                         <label>Primary reference</label>
@@ -1013,8 +1039,8 @@
                 identifiedBy: document.getElementById('o-identifiedby').value || null,
                 identificationVerificationStatus: document.getElementById('o-idverifstatus').value || null,
                 identificationRemarks: document.getElementById('o-idremarks').value || null,
-                collectionID: document.getElementById('o-collectionid').value || null,
-                catalogNumber: document.getElementById('o-catalognumber').value || null,
+                collectionID: window.obsLegacyCollection ? window.obsLegacyCollection.collectionID : null,
+                catalogNumber: window.obsLegacyCollection ? window.obsLegacyCollection.catalogNumber : null,
                 basisOfRecord: document.getElementById('o-basisofrecord').value || null,
                 idTechnique: document.getElementById('o-idtechnique').value || null,
                 litID: window.obsPrimaryLitSelection ? window.obsPrimaryLitSelection.litID : null,
