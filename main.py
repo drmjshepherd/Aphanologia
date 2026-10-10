@@ -39,7 +39,8 @@ app.add_middleware(SessionMiddleware, secret_key=os.environ["SESSION_SECRET_KEY"
 # literature reference" component used by the taxonomy editor and
 # (eventually) the sample submission form, so that widget only has
 # to be written and maintained once.
-
+# Tells the browser to re-check static files (JS, CSS) with the server every
+# time, so edits show up on an ordinary refresh instead of a stale cached copy.
 class NoCacheStaticFiles(StaticFiles):
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
@@ -47,6 +48,54 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
+
+# ---------------------------------------------------------------
+# Shared observation dropdown lists
+# ---------------------------------------------------------------
+# The lists live in ONE place - static/js/sample_dropdown_options.js, the
+# file the forms use - and are read from it here when the server starts, so
+# what the forms offer and what the server accepts can't drift apart.
+def _load_js_option_lists(names):
+    path = os.path.join("static", "js", "sample_dropdown_options.js")
+    lists = {name: [] for name in names}
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        print(f"WARNING: could not read {path} ({e}); observation dropdown values will not be checked.")
+        return lists
+    for name in names:
+        m = re.search(r"const\s+" + name + r"\s*=\s*\[(.*?)\]\s*;", text, re.DOTALL)
+        if not m:
+            print(f"WARNING: list {name} not found in {path}; it will not be checked.")
+            continue
+        body = re.sub(r"//[^\n]*", "", m.group(1))
+        lists[name] = [v.replace('\\"', '"') for v in re.findall(r'"((?:[^"\\]|\\.)*)"', body)]
+    return lists
+
+_OBS_OPTION_LISTS = _load_js_option_lists(["IDENTIFICATION_CONFIDENCE", "BASIS_OF_RECORD", "ID_TECHNIQUES"])
+print("Observation dropdown lists loaded:", {k: len(v) for k, v in _OBS_OPTION_LISTS.items()})
+
+def _check_choice(label, value, allowed, current_value=None):
+    """Rejects a value that isn't in the shared dropdown list. Blank is fine,
+    and so is a value identical to what's already stored on the record (older
+    wording stays editable); only NEW non-standard values are refused."""
+    if value is None or str(value).strip() == "":
+        return
+    if not allowed or value in allowed:
+        return
+    if current_value is not None and value == current_value:
+        return
+    raise HTTPException(status_code=400, detail=f"{label} '{value}' is not one of the allowed options.")
+
+def _validate_observation_choices(payload, current=None):
+    cur = current or {}
+    _check_choice("Confidence in identification", payload.identificationVerificationStatus,
+                  _OBS_OPTION_LISTS["IDENTIFICATION_CONFIDENCE"], cur.get("identificationVerificationStatus"))
+    _check_choice("Basis of record", payload.basisOfRecord,
+                  _OBS_OPTION_LISTS["BASIS_OF_RECORD"], cur.get("basisOfRecord"))
+    _check_choice("Identification technique", payload.idTechnique,
+                  _OBS_OPTION_LISTS["ID_TECHNIQUES"], cur.get("idTechnique"))
 
 # Sets up the connection to Google's sign-in system using the
 # credentials from .env. server_metadata_url points Authlib at
@@ -2497,6 +2546,7 @@ def submit_observation(payload: ObservationSubmission, user: dict = Depends(requ
     Only allows adding to a sample this same user submitted, so
     people can't add records into someone else's sample.
     """
+    _validate_observation_choices(payload)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -2559,6 +2609,7 @@ def edit_own_observation(observation_id: str, payload: ObservationSelfEditSubmis
             raise HTTPException(status_code=404, detail="No such observation")
         
         assert_can_modify_observation(current, user)
+        _validate_observation_choices(payload, current)
 
         cursor.execute('SELECT 1 FROM taxonomy WHERE "taxonID" = %s;', (payload.taxonID,))
         if not cursor.fetchone():
@@ -4824,6 +4875,7 @@ def admin_create_observation(event_id: str, payload: ObservationEditSubmission, 
     """
     if not payload.taxonID:
         raise HTTPException(status_code=400, detail="taxonID is required")
+    _validate_observation_choices(payload)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -4976,6 +5028,7 @@ def edit_observation(observation_id: str, payload: ObservationEditSubmission, us
         current = cursor.fetchone()
         if not current:
             raise HTTPException(status_code=404, detail=f"No observation found with observationID {observation_id}")
+        _validate_observation_choices(payload, current)
 
         if payload.eventID and payload.eventID != current["eventID"]:
             cursor.execute('SELECT 1 FROM samples WHERE "eventID" = %s;', (payload.eventID,))
@@ -5634,4 +5687,3 @@ def get_live_schema(user: dict = Depends(require_superuser)):
     finally:
         cursor.close()
         conn.close()
-
