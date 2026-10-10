@@ -534,8 +534,8 @@
     </div>
 
     <script src="/static/js/literature_widget.js"></script>
-    <script src="/static/js/shade_widget.js"></script>
-    <script src="/static/js/sample_dropdown_options.js"></script>
+    <script src="/static/js/shade_widget.js?v=20261010"></script>
+    <script src="/static/js/sample_dropdown_options.js?v=20261010"></script>
 	
 	<script>
 		// ==================================================
@@ -714,6 +714,9 @@
         // SHADe BUILDER (shared widget)
         // ==================================================
         let currentShadeCode = null;
+        // The sample's saved SHADe text while it is being edited, so a code the
+        // picker can't represent (or an untouched one) is never wiped on save.
+        let editingShadeOriginal = null;
         const shadeWidgetHandle = ShadeWidget.mount(document.getElementById('shade-widget-container'), {
             onChange: (code) => { currentShadeCode = code; }
         });
@@ -1095,7 +1098,7 @@
                 latestDateCollected: document.getElementById('f-latest').value || null,
                 habitat: document.getElementById('f-habitat').value || null,
                 microhabitat: document.getElementById('f-microhabitat').value || null,
-                SHADe: currentShadeCode,
+                SHADe: currentShadeCode ?? editingShadeOriginal,
                 samplingProtocol: document.getElementById('f-protocol').value || null,
                 samplesizeValue: samplesizeValue,
                 samplesizeUnit: samplesizeUnit,
@@ -1128,6 +1131,7 @@
                 activeEventId = eventId;
                 editingSampleEventId = null;
                 editingSampleSnapshot = null;
+                editingShadeOriginal = null;
 
                 await refreshActiveSample();
                 if (!activeSample || activeSample.eventID !== eventId) {
@@ -1159,6 +1163,7 @@
             showSampleSummary(activeSample || editingSampleSnapshot);
             editingSampleEventId = null;
             editingSampleSnapshot = null;
+            editingShadeOriginal = null;
         }
 
         function parseFloatOrNull(v) { return v === '' ? null : parseFloat(v); }
@@ -1174,6 +1179,7 @@
             document.getElementById('sample-form').reset();
             shadeWidgetHandle.reset();
             currentShadeCode = null;
+            editingShadeOriginal = null;
             document.getElementById('f-samplesize-unit-field').style.display = 'none';
             document.getElementById('f-licenceholder-field').style.display = 'none';
             resetSourcePicker();
@@ -1274,6 +1280,7 @@
             resetSourcePicker();
             shadeWidgetHandle.reset();
             currentShadeCode = null;
+            editingShadeOriginal = null;
 
             showSampleForm(false);
             document.getElementById('sample-form').reset();
@@ -1294,6 +1301,9 @@
             showSampleForm(true);
             document.getElementById('sample-form').reset();
             populateSampleFormFields(sample);
+            editingShadeOriginal = sample.SHADe || null;
+            shadeWidgetHandle.reset();
+            shadeWidgetHandle.setCode(sample.SHADe);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
