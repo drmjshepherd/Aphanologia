@@ -185,8 +185,8 @@
     </datalist>
 
     <script src="/static/js/literature_widget.js"></script>
-    <script src="/static/js/shade_widget.js"></script>
-    <script src="/static/js/sample_dropdown_options.js"></script>
+    <script src="/static/js/shade_widget.js?v=20261010"></script>
+    <script src="/static/js/sample_dropdown_options.js?v=20261010"></script>
     <script>
         let currentUser = null;
         let isSuperuser = false;
@@ -435,8 +435,9 @@
                     <div class="field"><label>Microhabitat</label><input type="text" id="s-microhabitat" value="${esc(s.microhabitat)}"></div>
                     <div class="field">
                         <label>SHADe</label>
-                        <input type="text" id="s-shade" value="${esc(s.SHADe)}">
+                        <input type="text" id="s-shade" value="${esc(s.SHADe)}" readonly style="background:#f1f3f5;">
                         <button type="button" class="secondary small" style="margin-top:6px;" onclick="toggleShadePicker()">Open SHADe picker</button>
+                        <span class="hint">Read-only: change it with the picker.</span>
                         <div id="shade-picker-container" style="display:none; margin-top:8px;"></div>
                     </div>
                 </div>
