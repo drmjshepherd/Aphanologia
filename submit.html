@@ -484,11 +484,6 @@
 							<label for="obs-verification">Confidence in identification</label>
 							<select id="obs-verification">
 								<option value="">-- Select --</option>
-								<option value="certain">Certain</option>
-								<option value="probable">Probable</option>
-								<option value="plausible">Plausible</option>
-								<option value="unlikely">Unlikely</option>
-								<option value="unverified">Unverified</option>
 							</select>
 						</div>
 					</div>
@@ -497,19 +492,12 @@
 							<label for="obs-basis">Basis of record</label>
 							<select id="obs-basis">
 								<option value="">-- Select --</option>
-								<option value="Preserved specimen">Preserved specimen</option>
-								<option value="Still photograph">Still photograph</option>
-								<option value="COI barcode">COI barcode</option>
-								<option value="Human observation">Human observation</option>
 							</select>
 						</div>
 						<div class="field">
 							<label for="obs-technique">Identification technique</label>
 							<select id="obs-technique">
 								<option value="">-- Select --</option>
-								<option value="Morphological">Morphological observation</option>
-								<option value="Genetic">Genetics</option>
-								<option value="Image recognition">Image recognition</option>
 							</select>
 						</div>
 					</div>
@@ -535,7 +523,7 @@
 
     <script src="/static/js/literature_widget.js"></script>
     <script src="/static/js/shade_widget.js?v=20261010"></script>
-    <script src="/static/js/sample_dropdown_options.js?v=20261010"></script>
+    <script src="/static/js/sample_dropdown_options.js?v=20261011"></script>
 	
 	<script>
 		// ==================================================
@@ -736,6 +724,21 @@
 
         populateSelectWithOptions(document.getElementById('f-habitat'), SampleDropdownOptions.HABITATS, "Habitat");
         populateSelectWithOptions(document.getElementById('f-protocol'), SampleDropdownOptions.SAMPLING_PROTOCOLS, "Sampling protocol");
+
+        // Observation dropdowns come from the same shared options file as the
+        // record editor, so the two pages always offer the same choices.
+        (function populateObservationDropdowns() {
+            const conf = document.getElementById('obs-verification');
+            for (const v of SampleDropdownOptions.IDENTIFICATION_CONFIDENCE) {
+                conf.innerHTML += `<option value="${v}">${v.charAt(0).toUpperCase() + v.slice(1)}</option>`;
+            }
+            for (const v of SampleDropdownOptions.BASIS_OF_RECORD) {
+                document.getElementById('obs-basis').innerHTML += `<option value="${v}">${v}</option>`;
+            }
+            for (const v of SampleDropdownOptions.ID_TECHNIQUES) {
+                document.getElementById('obs-technique').innerHTML += `<option value="${v}">${v}</option>`;
+            }
+        })();
 
         // ==================================================
         // SOURCE OF RECORD PICKER
@@ -1433,14 +1436,22 @@
             saveObservation(true);
         });
 
+        function setObservationSelect(id, value) {
+            const el = document.getElementById(id);
+            if (value) ensureOptionExists(el, value);
+            else el.value = '';
+        }
+
         function populateObservationFormFields(snap) {
             selectedTaxonId = snap.taxonID;
             obsSearchBox.value = snap.taxonLabel;
             document.getElementById('obs-taxon-selected').textContent = `Selected: ${snap.taxonLabel} (taxonID ${snap.taxonID})`;
             document.getElementById('obs-identifiedby').value = snap.identifiedBy || '';
-            document.getElementById('obs-verification').value = snap.identificationVerificationStatus || '';
-            document.getElementById('obs-basis').value = snap.basisOfRecord || '';
-            document.getElementById('obs-technique').value = snap.idTechnique || '';
+            // An older value that isn't in the standard list is added to the
+            // dropdown so it survives an edit instead of being blanked.
+            setObservationSelect('obs-verification', snap.identificationVerificationStatus);
+            setObservationSelect('obs-basis', snap.basisOfRecord);
+            setObservationSelect('obs-technique', snap.idTechnique);
             document.getElementById('obs-idtext').value = snap.idText || '';
         }
 
